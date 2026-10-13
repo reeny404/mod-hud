@@ -173,6 +173,16 @@ test('끝났다는 알림의 작업 id 만 뽑는다', () => {
   expect(finishedTaskIds('push 끝났어?')).toEqual([])
 })
 
+test('서브에이전트가 결과를 돌려준 메시지도 끝난 것으로 본다', () => {
+  const prompt = 'Another Claude session sent a message: <agent-message from="a701">\n[Subagent hand-back] 보고서'
+  // transcript 줄에서는 JSON 문자열이라 따옴표와 줄바꿈이 escape 돼 있다
+  const line = String.raw`{"content":"<agent-message from=\"a0fd\">\n[Subagent hand-back] 보고서"}`
+  const chat = '<agent-message from="peer">안녕</agent-message>'
+  expect(finishedTaskIds(prompt)).toEqual(['a701'])
+  expect(finishedTaskIds(line)).toEqual(['a0fd'])
+  expect(finishedTaskIds(chat)).toEqual([])
+})
+
 test('끝난 작업과 너무 오래된 작업은 진행 중에서 뺀다', () => {
   const tasks = [
     { id: 'a', at: NOW - 1000 },

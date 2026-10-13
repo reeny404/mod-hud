@@ -181,19 +181,62 @@ async function backgroundTasks($: EngineInterface): Promise<BackgroundTask[]> {
   return own?.background ?? []
 }
 
-// 답은 끝났지만 백그라운드 작업을 기다리는 세션. 확인 대기 대신 진행 중에 둔다
+// 답은 끝났지만 백그라운드 작업을 기다리는 세션. 확인 대기 대신 진행 중에 두고, heartbeat 가 작업이 끝났는지 다시 본다
 async function keepWorking($: EngineInterface) {
-  await writeStatus($, { state: 'working', attention: null })
+  await writeStatus($, { state: 'working', attention: null, waitingOnTasks: true })
 }
 
 // classic hook 이 알려 준 transcript 경로. mod 가 다시 로드된 직후에는 비어 있어 규칙으로 만든다
 let transcriptPath: string | null = null
 
+async function ownTranscript($: EngineInterface): Promise<string | null> {
+  const home = await $.env.get('HOME')
+  return transcriptPath ?? (home ? transcriptPathOf(home, await $.session.root(), await $.session.id()) : null)
+}
+
+// 끝났다는 알림이 prompt.submit 을 거치지 않고 올 때가 있다. 턴 도중에 와서 queued_command 로 붙거나, 결과가 <agent-message> 로 먼저 온 경우다
+// 그래서 transcript 에서 그 작업 id 가 나온 줄만 grep 으로 뽑아 끝난 작업을 찾는다
+async function finishedInTranscript($: EngineInterface, tasks: readonly BackgroundTask[]): Promise<string[]> {
+  try {
+    const path = await ownTranscript($)
+    if (!path || tasks.length === 0) {
+      return []
+    }
+    const found = await $.process.run(['grep', '-F', ...tasks.flatMap(task => ['-e', task.id]), path])
+    return finishedTaskIds(found.stdout)
+  } catch {
+    return []
+  }
+}
+
+// 끝났거나 너무 오래된 작업을 지우고 남은 작업을 돌려준다. transcript 까지 보는 것은 턴이 끝났을 때만이다
+async function settleBackground($: EngineInterface, now: number, withTranscript: boolean): Promise<BackgroundTask[]> {
+  const tasks = await backgroundTasks($)
+  const finished = withTranscript ? await finishedInTranscript($, pendingTasks(tasks, now)) : []
+  const pending = pendingTasks(tasks, now, finished)
+  if (pending.length !== tasks.length) {
+    await writeStatus($, { background: pending })
+  }
+  return pending
+}
+
+// 1분마다 살아 있다고 남긴다. 백그라운드 작업만 기다리던 세션은 작업이 다 끝났으면 내 차례로 넘긴다
+async function heartbeat($: EngineInterface) {
+  const now = await $.clock.now()
+  const isWaitingOnTasks = mine?.state === 'working' && mine.waitingOnTasks === true
+  const pending = await settleBackground($, now, isWaitingOnTasks)
+  if (isWaitingOnTasks && pending.length === 0) {
+    await writeStatus($, { state: 'waiting', waitingOnTasks: false })
+    await setAttention($, { kind: 'answered', since: now, text: null })
+    return
+  }
+  await writeStatus($, {})
+}
+
 // /resume 목록에 보이는 이름을 transcript 에서 읽는다. 파일이 커서 이름 줄만 grep 으로 뽑는다
 async function readTitle($: EngineInterface): Promise<string | null> {
   try {
-    const home = await $.env.get('HOME')
-    const path = transcriptPath ?? (home ? transcriptPathOf(home, await $.session.root(), await $.session.id()) : null)
+    const path = await ownTranscript($)
     if (!path) {
       return null
     }
@@ -576,7 +619,7 @@ export const register: Register = (on, options) => {
       description: '세션과 이슈 상태 패널을 열거나 닫는다',
     })
     await writeStatus($, { state: 'waiting' })
-    $.clock.every(HEARTBEAT_MS, () => void writeStatus($, {}))
+    $.clock.every(HEARTBEAT_MS, () => void heartbeat($))
     // 입력창 위 한 줄은 늘 보이므로 패널이 닫혀 있어도 읽는다
     $.clock.every(SESSIONS_REFRESH_MS, () => {
       void refreshSessions($)
@@ -610,7 +653,7 @@ export const register: Register = (on, options) => {
     const prompt = e.text.trimStart().startsWith('<') ? null : firstLine(e.text)
     const now = await $.clock.now()
     const background = pendingTasks(await backgroundTasks($), now, finishedTaskIds(e.text))
-    const base = { state: 'working' as const, attention: null, workingSince: now, background }
+    const base = { state: 'working' as const, attention: null, workingSince: now, background, waitingOnTasks: false }
     await writeStatus($, prompt ? { ...base, prompt } : base)
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -619,12 +662,12 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     // 서브에이전트의 턴이 끝나도 메인 세션은 아직 일하는 중이다
     if (e.agentId === undefined) {
-      await writeStatus($, { state: 'waiting', title: await readTitle($) })
+      await writeStatus($, { state: 'waiting', title: await readTitle($), waitingOnTasks: false })
       const now = await $.clock.now()
       const attention = attentionAfterTurn(e.answer, e.isAborted, now)
       // 백그라운드 작업(push, 서브에이전트 등)이 남았으면 그 알림에 세션이 다시 깨어나므로 아직 진행 중이다
       // classic.Stop 의 background_tasks 는 mod 에 오지 않아(2026-10-13 확인) 띄운 작업을 직접 센다
-      const isWaitingTask = pendingTasks(await backgroundTasks($), now).length > 0
+      const isWaitingTask = (await settleBackground($, now, true)).length > 0
       await (isWaitingTask && attention?.kind === 'answered' ? keepWorking($) : setAttention($, attention))
     }
     return done

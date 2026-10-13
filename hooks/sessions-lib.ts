@@ -103,12 +103,17 @@ export const launchedTaskId = (result: unknown): string | null => {
 }
 
 // <task-notification> 입력에서 끝난 작업 id 를 뽑는다. 아직 도는 중이라는 알림은 빼고 본다
-export const finishedTaskIds = (text: string): string[] =>
-  [...text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)]
+// 서브에이전트가 결과를 돌려준 <agent-message> 도 끝난 것으로 본다. transcript 줄에서는 따옴표가 \" 로 escape 돼 있다
+export const finishedTaskIds = (text: string): string[] => [
+  ...[...text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)]
     .map(match => match[1] ?? '')
     .filter(body => !/<status>\s*(running|pending)\s*<\/status>/.test(body))
     .map(body => body.match(/<task-id>\s*([^<\s]+)\s*<\/task-id>/)?.[1] ?? null)
-    .filter((id): id is string => id !== null)
+    .filter((id): id is string => id !== null),
+  ...[...text.matchAll(/<agent-message from=\\?"([^"\\]+)\\?">(?:\s|\\n)*\[Subagent hand-back\]/g)].map(
+    match => match[1] ?? '',
+  ),
+]
 
 // 끝난 것과 너무 오래된 것을 뺀, 아직 도는 백그라운드 작업
 export const pendingTasks = (

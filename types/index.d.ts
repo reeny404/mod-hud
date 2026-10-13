@@ -37,6 +37,8 @@ export type SessionStatus = TreeSession & {
   workingSince?: number
   // 백그라운드로 띄우고 아직 끝났다는 알림을 받지 못한 작업
   background?: BackgroundTask[]
+  // 턴은 끝났고 백그라운드 작업만 기다리는 중. heartbeat 가 작업이 끝났는지 다시 본다
+  waitingOnTasks?: boolean
 }
 
 // 백그라운드 Bash 의 backgroundTaskId 나 백그라운드 Agent 의 agentId 와 띄운 시각
