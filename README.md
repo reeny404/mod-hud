@@ -1,96 +1,100 @@
 # mod-hud
 
-Claude Code 세션을 여러 개 띄워 두고 일할 때, 어느 세션이 나를 기다리는지 한눈에 보이게 하는 mod 다.
-입력창 위에 한 줄이 늘 보이고, `/mod-hud` 로 패널을 연다.
+English | [한국어](README.ko.md)
 
-Claude Code 엔진 안에서 도는 코드라서 Node, npm, React 를 따로 설치할 필요가 없다. 프로젝트 언어(Python 등)와도 상관없다.
+A Claude Code mod that shows, at a glance, which of your many open Claude Code sessions is waiting on you.
+A one-line band always sits above the prompt, and `/mod-hud` opens the full panel.
 
-## 보이는 것
+It runs inside the Claude Code engine, so there is no Node, npm or React to install, and it works regardless of your project's language (Python and so on).
 
-| 섹션 | 내용 | 필요한 것 |
+## What it shows
+
+| Section | Contents | Requires |
 | --- | --- | --- |
-| 내 차례 | 답을 끝냈거나 질문하고 멈춘 세션. 1분 넘게 그대로면 OS 알림을 보낸다 | 없음 |
-| 진행 중 | 일하는 세션, 할 일 진행률, 실패한 검사(pytest, ruff, mypy, pnpm test 등) | 없음 |
-| Worktree | 지금 저장소의 worktree 별 브랜치, 기준 브랜치 대비 커밋 수, 변경 수, MR 상태 | git 저장소. MR 은 GitLab 과 토큰 |
-| MR | 충돌이 났거나 머지할 수 있는 MR | GitLab 과 토큰 |
-| Linear Inbox | 나를 멘션했거나 내 댓글에 답한 안 읽은 Linear 알림. GitLab 이 바꾼 상태 알림은 뺀다 | claude.ai 의 Linear 커넥터 |
+| Your turn (내 차례) | Sessions that finished answering or stopped to ask a question. Sends an OS notification if one sits untouched for over a minute | Nothing |
+| In progress (진행 중) | Working sessions, todo progress, failing checks (pytest, ruff, mypy, pnpm test, etc.) | Nothing |
+| Worktree | For each worktree of the current repo: branch, commits ahead of the base branch, number of changes, MR status | A git repo. MR status needs GitLab and a token |
+| MR | MRs that have conflicts or are ready to merge | GitLab and a token |
+| Linear Inbox | Unread Linear notifications where you were mentioned or someone replied to your comment. Status changes made by GitLab are left out | The Linear connector on claude.ai |
 
-필요한 것이 없는 섹션은 그냥 보이지 않는다.
+Sections whose requirements aren't met are simply hidden.
 
-## 설치
+The panel labels are in Korean.
 
-Claude Code 터미널에서 마켓플레이스를 추가하고 설치한다.
+## Install
+
+Add the marketplace and install from a Claude Code terminal.
 
 ```bash
 claude plugin marketplace add reeny404/mod-hud
 claude plugin install mod-hud@hyoyyoi
 ```
 
-설치할 때 scope 는 user 를 고른다. 그러면 모든 프로젝트의 세션에서 켜진다.
-설치 뒤 새 세션을 열거나 열려 있는 세션에서 `/reload-plugins` 를 하고 `/mod-hud` 를 입력해 패널이 뜨는지 본다.
+Choose the `user` scope when installing, so it's enabled in sessions for every project.
+After installing, open a new session (or run `/reload-plugins` in an open one), then type `/mod-hud` to check that the panel appears.
 
-업데이트는 이렇게 받는다.
+To update:
 
 ```bash
 claude plugin marketplace update hyoyyoi
 claude plugin update mod-hud
 ```
 
-## GitLab MR 을 보려면
+## Showing GitLab MRs
 
-origin remote 가 GitLab 이면 MR 을 조회한다. 토큰은 다음 순서로 찾는다.
+If the `origin` remote is GitLab, mod-hud looks up MRs. It looks for a token in this order:
 
-1. 환경 변수 `GITLAB_TOKEN`
-2. 저장소 루트의 `.env.local` 안의 `GITLAB_TOKEN=...`
+1. The `GITLAB_TOKEN` environment variable
+2. `GITLAB_TOKEN=...` in `.env.local` at the repo root
 
-환경 변수로 줄 때는 `~/.claude/settings.json` 의 `env` 에 넣으면 Claude Code 세션에만 적용된다.
+To pass it as an environment variable, put it under `env` in `~/.claude/settings.json` so it only applies to Claude Code sessions.
 
 ```json
-{ "env": { "GITLAB_TOKEN": "<read_api 권한 토큰>" } }
+{ "env": { "GITLAB_TOKEN": "<token with read_api scope>" } }
 ```
 
-토큰은 GitLab > Preferences > Access Tokens 에서 `read_api` scope 로 만든다.
+Create the token in GitLab > Preferences > Access Tokens with the `read_api` scope.
 
-## 옵션
+## Options
 
-`/config` 의 플러그인 설정이나 설치 화면에서 바꾼다.
+Change these in the plugin settings under `/config`, or on the install screen.
 
-| 옵션 | 기본값 | 설명 |
+| Option | Default | Description |
 | --- | --- | --- |
-| `gitlabUrl` | 비움 | GitLab API 주소. 비우면 remote 주소에서 계산한다. ssh remote 인데 웹 포트가 다를 때만 넣는다 |
-| `baseBranch` | 비움 | 커밋 수를 셀 기준 브랜치. 비우면 `origin/HEAD`, 없으면 `main` |
-| `autoCleanup` | `false` | MR 이 머지됐고 남은 변경이 없는 worktree 와 로컬 브랜치를 자동으로 지운다 |
+| `gitlabUrl` | empty | GitLab API URL. When empty it's derived from the remote URL. Only set it when you use an ssh remote and the web port differs |
+| `baseBranch` | empty | Branch to count commits against. When empty, `origin/HEAD`, falling back to `main` |
+| `autoCleanup` | `false` | Automatically removes worktrees and local branches whose MR is merged and that have no remaining changes |
 
-### autoCleanup 켜기
+### Turning on autoCleanup
 
-worktree 와 브랜치를 지우는 옵션이라 기본으로 꺼 두었다. 켜는 방법은 셋 중 하나다.
+It's off by default because it deletes worktrees and branches. Turn it on in one of three ways:
 
-- 설치하면서 켠다: `claude plugin install mod-hud@hyoyyoi --config autoCleanup=true`
-- 설치한 뒤 켠다: Claude Code 에서 `/config` 를 열고 mod-hud 의 `Auto cleanup merged worktrees` 를 켠다
-- `--plugin-dir` 이나 `CLAUDE_CODE_PLUGIN_DIRS` 로 폴더를 직접 띄우는 경우: `~/.claude/settings.json` 에 넣는다
+- While installing: `claude plugin install mod-hud@hyoyyoi --config autoCleanup=true`
+- After installing: open `/config` in Claude Code and turn on mod-hud's `Auto cleanup merged worktrees`
+- If you load the folder directly with `--plugin-dir` or `CLAUDE_CODE_PLUGIN_DIRS`: add it to `~/.claude/settings.json`
 
   ```json
   { "pluginConfigs": { "mod-hud": { "options": { "autoCleanup": true } } } }
   ```
 
-켜 두면 2분마다 worktree 를 조회할 때 아래 조건을 모두 만족하는 worktree 만 지운다.
+When on, each worktree check (every 2 minutes) removes only worktrees that meet all of these:
 
-- 메인 worktree 가 아니다
-- 그 브랜치의 MR 이 merged 다 (그래서 GitLab 토큰이 있어야 동작한다)
-- 커밋하지 않은 변경이 없다
-- 로컬 HEAD 가 MR 의 마지막 커밋과 같다. MR 에 없는 커밋이 있으면 지우지 않는다
-- 그 worktree 에서 열린 세션이 없다. 하루 넘게 입력만 기다린 세션은 열린 것으로 치지 않는다
+- It isn't the main worktree
+- The branch's MR is merged (so this needs a GitLab token)
+- It has no uncommitted changes
+- The local HEAD matches the MR's last commit. If there are commits not in the MR, it's kept
+- No session is open in that worktree. A session that has only been waiting for input for over a day doesn't count as open
 
-지울 때는 `git worktree remove` 뒤 로컬 브랜치를 `git branch -D` 로 지운다. squash 머지여도 지워지게 `-D` 를 쓰며, 위 HEAD 조건 덕분에 MR 에 없는 커밋은 잃지 않는다.
-지우면 토스트로 알리고 Worktree 섹션 아래에 한 줄 남긴다. 조건 중 하나가 걸리면 지우지 않고 그 이유를 `머지됨, 정리 보류: ...` 로 보인다.
+It removes the worktree with `git worktree remove`, then deletes the local branch with `git branch -D`. `-D` is used so squash-merged branches are removed too, and the HEAD check above ensures no commits missing from the MR are lost.
+Each removal shows a toast and leaves a line under the Worktree section. If any condition fails, it keeps the worktree and shows the reason as `머지됨, 정리 보류: ...` ("merged, cleanup on hold: ...").
 
-## 알려진 한계
+## Known limitations
 
-- 권한 승인 창이 떠 있는 세션을 "권한 승인"으로 올리는 기능은 Claude Code 가 mod 에 알림 이벤트를 넘겨주지 않아 지금은 동작하지 않는다.
-- 세션 상태는 `~/.claude/mod-sessions/` 에 세션마다 파일로 남고, 하루 지난 파일은 지운다.
-- 브랜치 이름에서 이슈 번호를 읽는다. `feat/#ABC-12-x`, `fix/ABC-12-x` 처럼 대문자 키가 있어야 한다.
+- Raising a session with an open permission prompt to "permission needed" doesn't work yet, because Claude Code doesn't pass that notification event to mods.
+- Session state is kept as one file per session in `~/.claude/mod-sessions/`, and files older than a day are deleted.
+- Issue keys are read from branch names, so they need an uppercase key, as in `feat/#ABC-12-x` or `fix/ABC-12-x`.
 
-## 개발
+## Development
 
 ```bash
 claude plugin validate .
