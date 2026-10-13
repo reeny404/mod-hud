@@ -1,0 +1,29 @@
+{
+  "name": "mod-hud",
+  "version": "0.2.0",
+  "description": "여러 Claude 세션의 상태(내 차례, 진행 중)와 저장소 worktree 별 커밋, MR, Linear 상태를 한 패널과 입력창 위 한 줄로 보인다",
+  "author": {
+    "name": "siann"
+  },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "gitlabUrl": {
+      "type": "string",
+      "title": "GitLab URL",
+      "description": "GitLab API 를 부를 주소(예: https://gitlab.example.com:8443). 비우면 origin remote 주소에서 계산한다. ssh remote 인데 API 포트가 다를 때만 넣는다",
+      "default": ""
+    },
+    "baseBranch": {
+      "type": "string",
+      "title": "Base branch",
+      "description": "worktree 의 커밋 수를 셀 기준 브랜치. 비우면 origin/HEAD 를 따르고, 그것도 없으면 main",
+      "default": ""
+    },
+    "autoCleanup": {
+      "type": "boolean",
+      "title": "Auto cleanup merged worktrees",
+      "description": "MR 이 머지됐고 남은 변경이 없는 worktree 와 그 로컬 브랜치를 자동으로 지운다",
+      "default": false
+    }
+  }
+}

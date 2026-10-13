@@ -1,0 +1,13 @@
+{
+  "name": "mod-hud",
+  "description": "Claude Code 세션 상태 HUD mod",
+  "owner": {
+    "name": "siann"
+  },
+  "plugins": [
+    {
+      "name": "mod-hud",
+      "source": "./"
+    }
+  ]
+}
