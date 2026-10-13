@@ -23,7 +23,7 @@ Claude Code 터미널에서 마켓플레이스를 추가하고 설치한다.
 
 ```bash
 claude plugin marketplace add reeny404/mod-hud
-claude plugin install mod-hud@mod-hud
+claude plugin install mod-hud@hyoyyoi
 ```
 
 설치할 때 scope 는 user 를 고른다. 그러면 모든 프로젝트의 세션에서 켜진다.
@@ -32,7 +32,7 @@ claude plugin install mod-hud@mod-hud
 업데이트는 이렇게 받는다.
 
 ```bash
-claude plugin marketplace update mod-hud
+claude plugin marketplace update hyoyyoi
 claude plugin update mod-hud
 ```
 
@@ -65,7 +65,7 @@ origin remote 가 GitLab 이면 MR 을 조회한다. 토큰은 다음 순서로 
 
 worktree 와 브랜치를 지우는 옵션이라 기본으로 꺼 두었다. 켜는 방법은 셋 중 하나다.
 
-- 설치하면서 켠다: `claude plugin install mod-hud@mod-hud --config autoCleanup=true`
+- 설치하면서 켠다: `claude plugin install mod-hud@hyoyyoi --config autoCleanup=true`
 - 설치한 뒤 켠다: Claude Code 에서 `/config` 를 열고 mod-hud 의 `Auto cleanup merged worktrees` 를 켠다
 - `--plugin-dir` 이나 `CLAUDE_CODE_PLUGIN_DIRS` 로 폴더를 직접 띄우는 경우: `~/.claude/settings.json` 에 넣는다
 
