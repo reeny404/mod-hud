@@ -10,7 +10,9 @@ import {
   boxPerRow,
   CELEBRATE_MS,
   DAILY_EGGS,
+  DAYCARE_GROUND_ROWS,
   drawBoxTile,
+  drawDaycareGround,
   drawPortrait,
   drawNest,
   eggSprite,
@@ -440,7 +442,7 @@ test('금 간 알과 부화한 알, 박스 이번 페이지의 포켓몬만 스�
   expect(speciesToLoad({ eggs, daycare: [], box, boxPage: 0 }, 80)).toEqual([eggs[1]!.species, eggs[2]!.species, 150])
 })
 
-test('그림은 알 줄과 키우미집을 합친 줄 수만큼 칸을 채우고 프레임마다 움직인다', () => {
+test('알 그림은 알 줄 수만큼 칸을 채우고 프레임마다 움직인다', () => {
   const dex = dexOf({ holds: { a: held('a'), b: held('b') } })
   const eggs = eggsOf([session('a', { state: 'working' }), session('b', { mrState: 'merged' })], dex, NOW)
   const input = { eggs, daycare: [held('d')], box: [dexEgg('k')], boxPage: 0 }
@@ -511,9 +513,13 @@ test('빈 둥지는 둥지 바닥만 그리고 알은 그리지 않는다', () =
   expect(Array.from(drawNest(egg, 40, 1, NOW, none)).some(value => !seen.has(value))).toBe(true)
 })
 
-test('키우미집은 알이 0개여도 보인다', () => {
+test('키우미집 풀밭은 알이 0개여도 네 줄로 그리고, 맡긴 알을 작게 그린다', () => {
   const empty = { eggs: [], daycare: [], box: [], boxPage: 0 }
-  expect(nestRows(empty, 40)).toBe(6)
+  // 알 줄과 키우미집은 따로 그린다. 세션이 없으면 알 그림은 0줄이다
+  expect(nestRows(empty, 40)).toBe(0)
+  const ground = drawDaycareGround([], 40, 0)
+  expect(ground.length).toBe(40 * DAYCARE_GROUND_ROWS * 3)
+  expect(drawDaycareGround([held('d')], 40, 0)).not.toEqual(ground)
 })
 
 test('박스는 한 페이지에 한 줄이고 넘치면 페이지를 나눈다', () => {

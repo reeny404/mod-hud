@@ -52,7 +52,9 @@ import {
   boxPageOfKey,
   boxPages,
   boxPerRow,
+  DAYCARE_GROUND_ROWS,
   drawBoxTile,
+  drawDaycareGround,
   drawNest,
   drawPortrait,
   eggsOf,
@@ -884,6 +886,8 @@ const EVOLVING_FRESH_MS = 60 * 1000
 let boxHeader: { count: number; lead: string | null } = { count: 0, lead: null }
 // PC BOX 를 접었는지. 접으면 머리줄의 앞장 정보만 보인다
 let boxCollapsed = false
+// 키우미집을 접었는지. 접으면 머리줄의 남은 알 수만 보인다
+let daycareCollapsed = false
 // 박스 칸에 마우스를 올리면 뜨는 카드의 글자. 칸 key 로 찾는다
 let boxCards = new Map<string, { name: string; caught: string; next: string | null; canLead: boolean }>()
 // 카드 폭. 원본 아이콘 40칸과 테두리
@@ -906,6 +910,10 @@ function base64Of(cells: Uint32Array): string {
 
 function nestCells(scene: { columns: number; input: NestInput }, now: number): string {
   return base64Of(drawNest(scene.input, scene.columns, nestFrame, now, lookupSprite))
+}
+
+function daycareCells(scene: { columns: number; input: NestInput }): string {
+  return base64Of(drawDaycareGround(scene.input.daycare, scene.columns, nestFrame))
 }
 
 // 이번 박스 페이지의 칸. 한 줄을 늘 꽉 채워 그리고, 포켓몬이 없는 칸은 null 이다
@@ -956,7 +964,11 @@ async function tickNest($: EngineInterface) {
   }
   nestFrame += 1
   const now = await $.clock.now()
-  const painted = await $.ui.blit({ requestId: PANE, key: 'nest', cells: nestCells(nestScene, now) })
+  // 알 줄이 있으면 알 그림을, 키우미집을 펼쳤으면 풀밭을 칠한다. 칠할 것이 없으면 거절도 세지 않는다
+  const painted = [
+    nestScene.rows > 0 ? await $.ui.blit({ requestId: PANE, key: 'nest', cells: nestCells(nestScene, now) }) : null,
+    daycareCollapsed ? null : await $.ui.blit({ requestId: PANE, key: 'daycare', cells: daycareCells(nestScene) }),
+  ].filter(one => one !== null)
   // 막 진화한 박스 칸만 깜빡이므로 그 칸만 다시 칠한다
   const evolving = nestScene.input.evolving
   if (evolving && now - evolving.at < EVOLVE_MS && !boxCollapsed) {
@@ -966,7 +978,7 @@ async function tickNest($: EngineInterface) {
       await $.ui.blit({ requestId: PANE, key: `tile-${at}`, cells: tileCells(nestScene, tiles[at]!, now) })
     }
   }
-  nestDenied = painted.deny ? nestDenied + 1 : 0
+  nestDenied = painted.some(one => one.deny) ? nestDenied + 1 : 0
   if (nestDenied >= NEST_DENY_LIMIT) {
     stopNest()
   }
@@ -1610,8 +1622,32 @@ export const register: Register = (on, options) => {
               .map(egg => (
                 <Button key={`send-${egg.key}`} label={`Send to PC BOX · ${egg.label}`} onPress={() => sendToBox($, egg.key)} />
               ))}
-            <Raster key="nest" columns={nestScene.columns} rows={nestScene.rows} cells={nestCells(nestScene, now)} />
-            <Box backgroundColor="#3a6ea5" width={nestScene.columns} paddingX={1}>
+            {nestScene.rows > 0 && (
+              <Raster key="nest" columns={nestScene.columns} rows={nestScene.rows} cells={nestCells(nestScene, now)} />
+            )}
+            <Box backgroundColor="#c8782a" width={nestScene.columns} paddingX={1}>
+              {/* 머리줄을 누르면 키우미집 풀밭을 접거나 편다 */}
+              <Button
+                plain
+                key="daycare-toggle"
+                onPress={() => {
+                  daycareCollapsed = !daycareCollapsed
+                  $.ui.invalidate('ui.render')
+                }}
+              >
+                <Text bold color="#ffffff">
+                  {daycareCollapsed ? '▸' : '▾'} DAY CARE
+                </Text>
+              </Button>
+              <Box flexGrow={1} />
+              <Text bold color="#ffe080">
+                {nestScene.input.daycare.length}
+              </Text>
+            </Box>
+            {!daycareCollapsed && (
+              <Raster key="daycare" columns={nestScene.columns} rows={DAYCARE_GROUND_ROWS} cells={daycareCells(nestScene)} />
+            )}
+            <Box backgroundColor="#3a6ea5" width={nestScene.columns} paddingX={1} marginTop={1}>
               {/* 머리줄을 누르면 박스를 접거나 편다 */}
               <Button
                 plain

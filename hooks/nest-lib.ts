@@ -891,8 +891,8 @@ export function boxPageOfKey(input: NestInput, width: number, key: string): numb
   return index < 0 ? boxPageOf(input, width) : Math.floor(index / boxPerRow(width))
 }
 
-// 키우미집은 머리글 한 줄과 작은 알 한 줄. 알이 없어도 그린다
-const DAYCARE_ROWS = 1 + 4
+// 키우미집 풀밭 줄 수. 머리줄은 누르면 접히게 패널이 따로 그린다
+export const DAYCARE_GROUND_ROWS = 4
 
 function drawDaycare(canvas: Canvas, eggs: HeldEgg[], frame: number) {
   for (let y = 0; y < canvas.height; y++) {
@@ -909,13 +909,20 @@ function drawDaycare(canvas: Canvas, eggs: HeldEgg[], frame: number) {
   })
 }
 
-// 알 줄과 키우미집을 그린다. 세션이 없으면 알 줄은 빼고, 키우미집은 알이 없어도 그린다. PC BOX 는 칸마다 따로 그린다(drawBoxTile)
+// 알 줄을 그린다. 세션이 없으면 0줄이다. 키우미집 풀밭(drawDaycareGround)과 PC BOX 칸(drawBoxTile)은 따로 그린다
 export function nestRows(input: NestInput, width: number): number {
   // 알 한 줄은 그림과 라벨 한 줄이고, 알이 있으면 그 아래 한 줄을 띄운다
   const layout = eggLayout(input.eggs, width)
-  const eggs = layout.reduce((sum, row) => sum + row.rows + 1, 0) + (layout.length > 0 ? 1 : 0)
-  const daycare = DAYCARE_ROWS + 1
-  return eggs + daycare
+  return layout.reduce((sum, row) => sum + row.rows + 1, 0) + (layout.length > 0 ? 1 : 0)
+}
+
+// 키우미집 풀밭과 맡긴 작은 알. 알이 없어도 그린다
+export function drawDaycareGround(daycare: HeldEgg[], width: number, frame: number): Uint32Array {
+  const ground = canvasOf(width, DAYCARE_GROUND_ROWS * 2)
+  drawDaycare(ground, daycare, frame)
+  const out: number[] = []
+  pixelCells(ground, out)
+  return Uint32Array.from(out)
 }
 
 export function drawNest(input: NestInput, width: number, frame: number, now: number, lookup: SpriteLookup): Uint32Array {
@@ -942,21 +949,6 @@ export function drawNest(input: NestInput, width: number, frame: number, now: nu
   if (input.eggs.length > 0) {
     textCells(width, [], CLEAR, out)
   }
-
-  const daycareCount = `${input.daycare.length}`
-  textCells(
-    width,
-    [
-      { at: 1, text: 'DAY CARE', color: C.boxBarText },
-      { at: width - daycareCount.length - 1, text: daycareCount, color: C.boxCount },
-    ],
-    C.daycareBar,
-    out,
-  )
-  const ground = canvasOf(width, (DAYCARE_ROWS - 1) * 2)
-  drawDaycare(ground, input.daycare, frame)
-  pixelCells(ground, out)
-  textCells(width, [], CLEAR, out)
 
   return Uint32Array.from(out)
 }
