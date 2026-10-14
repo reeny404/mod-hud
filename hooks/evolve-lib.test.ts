@@ -159,3 +159,16 @@ test('경험치 막대는 다섯 칸이고 남은 시간을 짧게 쓴다', () =
   expect(xpLeft(XP_PER_EVOLUTION_MS - 25 * 60_000 - 30_000)).toBe('26m')
   expect(xpLeft(XP_PER_EVOLUTION_MS + 5)).toBe('0m')
 })
+
+test('권한 창이나 질문으로 나를 기다리는 세션은 진행 중이어도 경험치를 쌓지 않는다', () => {
+  const asking = session('q', { attention: { kind: 'permission', since: NOW - 60_000, text: 'Bash' } })
+  const { dex } = advanceEvolution(dexOf({ xpAt: NOW - 60_000 }), [session('a'), asking], NOW)
+  expect(dex.xp).toBe(60_000)
+})
+
+test('시계가 뒤로 가도 경험치는 줄지 않고 막대도 깨지지 않는다', () => {
+  const { dex } = advanceEvolution(dexOf({ xp: 0, xpAt: NOW + 400 }), [session('a')], NOW)
+  expect(dex.xp).toBe(0)
+  expect(xpBar(-400)).toBe('░░░░░')
+  expect(parsePokedex(JSON.stringify({ xp: -5 })).xp).toBe(0)
+})

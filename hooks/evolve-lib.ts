@@ -49,8 +49,10 @@ export function advanceEvolution(dex: Pokedex, sessions: readonly SessionStatus[
 
   let xp = dex.xp
   if (dex.xpAt > 0 && now - dex.xpAt <= XP_GAP_MS) {
-    const working = sessions.filter(session => hasEgg(session) && livenessOf(session, now) === 'working').length
-    xp += (now - dex.xpAt) * working
+    // 권한 창이나 질문으로 나를 기다리는 세션은 상태가 working 이어도 일하지 않는 것으로 친다
+    const working = sessions.filter(session => hasEgg(session) && livenessOf(session, now) === 'working' && !session.attention).length
+    // 기록을 쓰는 세션이 바뀌며 시계가 조금 어긋나도 경험치가 줄지 않게 한다
+    xp += Math.max(0, now - dex.xpAt) * working
   }
 
   const able = (key: string | null) => box.find(one => one.key === key && canEvolve(one.species))
@@ -123,7 +125,7 @@ const BAR = 5
 
 // PC BOX 머리줄의 경험치 막대
 export function xpBar(xp: number): string {
-  const filled = Math.min(BAR, Math.floor((xp / XP_PER_EVOLUTION_MS) * BAR))
+  const filled = Math.max(0, Math.min(BAR, Math.floor((xp / XP_PER_EVOLUTION_MS) * BAR)))
   return '▓'.repeat(filled) + '░'.repeat(BAR - filled)
 }
 

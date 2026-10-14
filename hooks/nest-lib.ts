@@ -238,7 +238,7 @@ export function parsePokedex(text: string): Pokedex {
       holds: record(parsed.holds),
       done: Array.isArray(parsed.done) ? parsed.done : [],
       sent: Object.fromEntries(sent),
-      xp: number(parsed.xp),
+      xp: Math.max(0, number(parsed.xp)),
       xpAt: number(parsed.xpAt),
       lead: typeof parsed.lead === 'string' ? parsed.lead : null,
       chosen: parsed.chosen === true,
