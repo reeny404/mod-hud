@@ -113,18 +113,19 @@ const EGG_PALETTE = {
 }
 const EGG_WIDTH = EGG[0]!.length
 const EGG_HEIGHT = EGG.length
-// 금이 간 알의 금. 위에서 내려오다 아래에서 두 갈래로 갈라진다
-const CRACK = [
-  [5, 2],
-  [6, 3],
-  [7, 4],
-  [7, 5],
-  [6, 6],
-  [8, 6],
-  [5, 7],
-  [9, 7],
-  [6, 8],
-] as const
+// 금이 간 알의 금 모양들. 알마다 하나를 골라 그린다
+const CRACKS: ReadonlyArray<ReadonlyArray<readonly [number, number]>> = [
+  // 위에서 내려오다 아래에서 두 갈래로 갈라진다
+  [[5, 2], [6, 3], [7, 4], [7, 5], [6, 6], [8, 6], [5, 7], [9, 7], [6, 8]],
+  // 가운데 짧은 금
+  [[7, 3], [6, 4], [7, 5]],
+  // 지그재그로 내려오다 옆으로 한 칸 갈라진다
+  [[7, 2], [6, 3], [7, 4], [8, 4], [7, 5], [6, 6]],
+  // 껍질 꼭대기가 깨져 두 갈래로 내려온다
+  [[7, 0], [7, 1], [6, 2], [8, 2], [6, 3], [7, 4]],
+  // 오른쪽 위에서 내려오다 옆으로 한 칸 갈라진다
+  [[8, 2], [7, 3], [7, 4], [8, 4], [7, 5], [6, 6]],
+]
 // 키우미집에 쌓이는 작은 알
 const MINI_EGG = ['..kk..', '.kwwk.', 'keeeek', 'kGGeek', 'kGeeGk', '.kssk.', '..kk..']
 const MINI_SLOT = 7
@@ -576,7 +577,9 @@ function drawSlot(canvas: Canvas, slotX: number, slot: number, egg: Egg, frame: 
   const shift = egg.isShaking ? (WOBBLE[(frame + egg.key.length) % WOBBLE.length] ?? 0) : 0
   drawEgg(canvas, eggX + shift, eggTop)
   if (egg.stage === 'cracked') {
-    for (const [dx, dy] of CRACK) {
+    // 프레임마다 바뀌지 않게 알 key 로 고른다
+    const crack = CRACKS[hash(`crack:${egg.key}`) % CRACKS.length]!
+    for (const [dx, dy] of crack) {
       put(canvas, eggX + shift + dx, eggTop + dy, C.crack)
     }
   }

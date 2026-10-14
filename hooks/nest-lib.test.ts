@@ -488,3 +488,12 @@ test('박스가 한 페이지를 넘으면 페이지를 나누고, 페이지를 
   // 박스가 줄어 페이지가 사라지면 마지막 페이지로 당긴다
   expect(boxPageOf({ ...first, boxPage: 5 }, 72)).toBe(1)
 })
+
+test('금 간 알은 알마다 다섯 가지 금 중 하나로 그리고, 같은 알은 늘 같은 금이다', () => {
+  const draw = (key: string) => {
+    const egg = { key, label: 'x', species: 1, stage: 'cracked' as const, isShaking: false, activity: null, hatchedAt: null }
+    return Array.from(drawNest({ eggs: [egg], daycare: [], box: [], boxPage: 0 }, 40, 0, NOW, () => undefined)).join()
+  }
+  expect(draw('a')).toBe(draw('a'))
+  expect(new Set(Array.from({ length: 40 }, (_, i) => draw(`egg-${i}`))).size).toBe(5)
+})
