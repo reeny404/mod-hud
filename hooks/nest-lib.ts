@@ -283,7 +283,10 @@ export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[],
     }
     done.add(session.id)
     const egg = holds[session.id]
-    if (egg && !holds[heir.id]) {
+    // 이어 받을 세션이 이미 알을 들고 있으면 끝난 세션의 알은 키우미집으로 돌려보낸다
+    if (egg && holds[heir.id]) {
+      daycare.unshift(egg)
+    } else if (egg) {
       holds[heir.id] = egg
     }
     if (sent[session.id] !== undefined && sent[heir.id] === undefined) {
@@ -358,6 +361,12 @@ export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[],
     const egg = daycare.shift()
     if (!egg) {
       break
+    }
+    // 이 알을 전에 들었던 세션은 잠자기에서 돌아와도 되찾지 못하게 기록에서 지운다
+    for (const [id, other] of Object.entries(holds)) {
+      if (other.key === egg.key) {
+        delete holds[id]
+      }
     }
     holds[session.id] = egg
     // 이미 머지된 브랜치에서 받은 알은 그 머지로 깨지지 않는다

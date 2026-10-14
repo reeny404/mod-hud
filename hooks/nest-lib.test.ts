@@ -318,6 +318,28 @@ test('잠자기에서 돌아온 세션은 남아 있는 자기 알만 되찾는�
   expect(back.holds).toEqual({ b: held('egg-a') })
 })
 
+test('다른 세션이 받아 간 알은 그 세션이 닫혀 머지를 기다려도 잠자기에서 돌아온 세션이 가져가지 않는다', () => {
+  const asleep = session('a', { updatedAt: NOW - 2 * 60 * 60 * 1000 })
+  const gone = advancePokedex(dexOf({ holds: { a: held('egg-a') } }), [asleep], NOW).dex
+  const taken = advancePokedex(gone, [asleep, session('b', { state: 'working' })], NOW + 1).dex
+  expect(taken.holds).toEqual({ b: held('egg-a') })
+  const waiting = advancePokedex(taken, [asleep, session('b', { ...closed, mrState: 'opened' })], NOW + 2).dex
+  expect(waiting.pending.map(egg => egg.key)).toEqual(['egg-a'])
+  const back = advancePokedex(waiting, [session('a', { updatedAt: NOW + 3 }), session('b', { ...closed, mrState: 'opened' })], NOW + 3).dex
+  expect(back.pending.map(egg => egg.key)).toEqual(['egg-a'])
+  expect(back.holds.a).toBeUndefined()
+})
+
+test('/clear 로 이어진 세션이 이미 알을 들고 있으면 끝난 세션의 알은 키우미집으로 돌아간다', () => {
+  const sessions = [
+    session('old', { state: 'ended', endReason: 'clear' }),
+    session('new', { predecessor: 'old' }),
+  ]
+  const after = advancePokedex(dexOf({ holds: { old: held('egg-old'), new: held('egg-new') } }), sessions, NOW)
+  expect(after.dex.holds).toEqual({ new: held('egg-new') })
+  expect(after.dex.daycare).toEqual([held('egg-old')])
+})
+
 test('금 간 알과 부화한 알, 박스 이번 페이지의 포켓몬만 스프라이트를 불러온다', () => {
   const dex = dexOf({ holds: { a: held('a', 1), b: held('b', 2), c: held('c', 3) } })
   const eggs = eggsOf([session('a'), session('b', { mrState: 'opened' }), session('c', { mrState: 'merged' })], dex, NOW)
