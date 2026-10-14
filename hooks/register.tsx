@@ -1,7 +1,19 @@
 import { atom, read, update } from 'claude-code'
 import type { BuiltinToolResults, EngineInterface, Register, RenderElement } from 'claude-code'
 
-import type { Attention, BackgroundTask, BoardEntry, InboxCache, InboxItem, IssuesCache, Mr, Row, SessionStatus, TodoItem } from '../types'
+import type {
+  Attention,
+  BackgroundTask,
+  BoardEntry,
+  InboxCache,
+  InboxItem,
+  IssuesCache,
+  Mr,
+  Pokedex,
+  Row,
+  SessionStatus,
+  TodoItem,
+} from '../types'
 import {
   applyFetch,
   categoryLabel,
@@ -32,12 +44,30 @@ import {
   readEnvValue,
 } from './issues-lib'
 import {
+  advancePokedex,
+  boxPageOf,
+  boxPages,
+  drawNest,
+  eggsOf,
+  eggsOnScreen,
+  emptyPokedex,
+  keeperOf,
+  nestRows,
+  parsePokedex,
+  speciesToLoad,
+  updatePending,
+} from './nest-lib'
+import type { NestInput, SpriteLookup } from './nest-lib'
+import { crop, decodePng, fit } from './png-lib'
+import type { Pixels } from './png-lib'
+import {
   applyTaskUpdate,
   attentionAfterTurn,
   finishedTaskIds,
   firstLine,
   formatFor,
   freshness,
+  isCodeReviewPrompt,
   launchedTaskId,
   pendingTasks,
   projectName,
@@ -60,6 +90,8 @@ const ATTENTION = {
   answered: { mark: '✓', label: '확인 대기', color: 'green' },
 } as const
 const HEARTBEAT_MS = 60 * 1000
+// 알과 박스 그림을 다시 칠하는 간격. 패널 전체가 아니라 그림만 칠하므로 짧아도 된다
+const NEST_TICK_MS = 250
 const SESSIONS_REFRESH_MS = 30 * 1000
 
 // 세션 상태
@@ -80,6 +112,8 @@ const sessionsMeta = atom({ plugin: 'mod-hud', key: 'sessionsMeta' } as const, {
 
 let dir: string | null = null
 let mine: SessionStatus | null = null
+// /clear 나 /resume 로 끝난 세션. 같은 창에서 이어지는 새 세션이 알과 대시보드 표시를 물려받는다
+let handoff: { id: string; isDashboard: boolean } | null = null
 let todos: TodoItem[] = []
 let isRefreshing = false
 
@@ -132,6 +166,10 @@ async function writeStatus($: EngineInterface, patch: Partial<SessionStatus>) {
       state: 'waiting',
       prompt: null,
       todos: null,
+      // 대시보드 표시, 리뷰 세션 표시와 MR 상태는 mod 를 다시 로드해도 이어 간다
+      isDashboard: prev?.isDashboard,
+      isCodeReview: prev?.isCodeReview,
+      mrState: prev?.mrState,
       ...mine,
       ...patch,
       id,
@@ -294,8 +332,10 @@ async function refreshSessions($: EngineInterface) {
   try {
     const now = await $.clock.now()
     const merged = Object.entries(await read($, branchMrs)).flatMap(([branch, mr]) => (mr.state === 'merged' ? [branch] : []))
-    const next = triage(await readSessions($), mine?.id ?? null, now, new Set(merged))
+    const sessions = await readSessions($)
+    const next = triage(sessions, mine?.id ?? null, now, new Set(merged))
     await update($, board, () => next)
+    await keepPokedex($, sessions, now).catch(() => undefined)
     await update($, sessionsMeta, () => ({ refreshedAt: now, ownId: mine?.id ?? null }))
   } finally {
     isRefreshing = false
@@ -511,11 +551,266 @@ async function refreshIssues($: EngineInterface, isForced: boolean) {
     await update($, rows, () => cache.rows)
     await update($, branchMrs, () => cache.branchMrs)
     await update($, issuesMeta, () => ({ refreshedAt: cache.fetchedAt, isRefreshing: false, log: cache.log }))
+    // 포켓몬 알이 금 가고 부화하는 기준이라, 이 세션 브랜치의 MR 상태를 상태 파일에 적어 다른 세션도 보게 한다
+    const mrState = mine?.branch ? (cache.branchMrs[mine.branch]?.state ?? null) : null
+    if (mine && (mine.mrState ?? null) !== mrState) {
+      await writeStatus($, { mrState })
+    }
   } catch {
     // 이슈를 못 읽어도 다른 패널 동작은 막지 않는다
   } finally {
     isIssuesRefreshing = false
     await update($, issuesMeta, prev => ({ ...prev, isRefreshing: false }))
+  }
+}
+
+// 포켓몬 알과 박스
+
+// 부화, 키우미집, 박스 기록. 열린 세션 중 id 가 가장 작은 세션만 쓰고, 모든 세션이 읽는다
+const POKEDEX_FILE = '.claude/mod-hud-pokedex.json'
+// 박스로 보내기 요청. 어느 세션에서 눌러도 알 key 이름의 빈 파일을 두고, 기록을 쓰는 세션이 읽어 박스에 넣은 뒤 지운다
+const SENDBOX_DIR = '.claude/mod-hud-sendbox'
+// 세션이 닫힌 뒤 머지를 기다리는 알의 MR 을 다시 조회하는 간격
+const PENDING_CHECK_MS = 2 * 60 * 1000
+
+const pokedex = atom({ plugin: 'mod-hud', key: 'pokedex' } as const, emptyPokedex())
+const eggs = atom({ plugin: 'mod-hud', key: 'eggs' } as const, [])
+
+let pendingCheckedAt = 0
+
+async function readPokedex($: EngineInterface, home: string): Promise<Pokedex> {
+  try {
+    return parsePokedex(await $.fs.read(`${home}/${POKEDEX_FILE}`))
+  } catch {
+    return emptyPokedex()
+  }
+}
+
+// 닫힌 세션의 브랜치는 그 세션의 저장소 remote 와 토큰으로 MR 을 다시 조회한다
+async function refreshPending($: EngineInterface, dex: Pokedex): Promise<Pokedex> {
+  let next = dex
+  for (const egg of dex.pending) {
+    if (egg.mrState !== 'opened' || !egg.branch) {
+      continue
+    }
+    try {
+      const remote = (await git($, egg.root, ['remote', 'get-url', 'origin']))?.trim()
+      const api = remote ? gitlabProjectApi(remote, config.gitlabUrl) : null
+      const token = api ? await readToken($, egg.root) : null
+      const mr = api && token ? await fetchMr($, api, token, egg.branch) : null
+      if (mr && mr.state !== egg.mrState) {
+        next = updatePending(next, egg.key, mr.state)
+      }
+    } catch {
+      // 조회하지 못하면 다음 주기에 다시 본다
+    }
+  }
+  return next
+}
+
+async function sendToBox($: EngineInterface, key: string) {
+  const home = await $.env.get('HOME')
+  if (!home) {
+    return
+  }
+  const dir = `${home}/${SENDBOX_DIR}`
+  await $.process.run(['mkdir', '-p', dir])
+  await $.fs.write(`${dir}/${key}`, '')
+  // 기록을 쓰는 세션이 다음 조회 때 넣으므로, 그동안 이 패널에서는 바로 빼 둔다
+  await update($, eggs, prev => prev.filter(egg => egg.key !== key))
+  void refreshSessions($)
+}
+
+async function readSendRequests($: EngineInterface, home: string): Promise<string[]> {
+  const dir = `${home}/${SENDBOX_DIR}`
+  try {
+    return (await $.fs.exists(dir)) ? (await $.fs.list(dir)).map(entry => entry.name) : []
+  } catch {
+    return []
+  }
+}
+
+// 세션 목록을 읽을 때마다 기록을 맞춘다. 기록을 쓰는 세션만 파일을 바꾸고 토스트를 띄운다
+async function keepPokedex($: EngineInterface, sessions: SessionStatus[], now: number) {
+  const home = await $.env.get('HOME')
+  if (!home) {
+    return
+  }
+  let dex = await readPokedex($, home)
+  if (keeperOf(sessions, now) === (await $.session.id())) {
+    const before = JSON.stringify(dex)
+    if (now - pendingCheckedAt >= PENDING_CHECK_MS) {
+      pendingCheckedAt = now
+      dex = await refreshPending($, dex)
+    }
+    const requests = await readSendRequests($, home)
+    const advanced = advancePokedex(dex, sessions, now, requests)
+    dex = advanced.dex
+    if (JSON.stringify(dex) !== before) {
+      await $.fs.write(`${home}/${POKEDEX_FILE}`, JSON.stringify(dex))
+    }
+    // 부화하지 않은 알의 요청은 버튼이 없어 생기지 않으니, 읽은 요청은 모두 지운다
+    for (const name of requests) {
+      await $.process.run(['rm', '-f', `${home}/${SENDBOX_DIR}/${name}`])
+    }
+    for (const egg of advanced.born) {
+      $.ui.toast(`짜잔! ${egg.label} 알에서 ${await pokemonName($, home, egg.species)} 탄생`)
+    }
+    for (const egg of advanced.boxed) {
+      $.ui.toast(`PC 박스에 ${await pokemonName($, home, egg.species)} 저장 (${egg.label})`)
+    }
+    for (const egg of advanced.left) {
+      $.ui.toast(`키우미집에 ${egg.label} 알을 맡겼다`)
+    }
+    for (const egg of advanced.claimed) {
+      $.ui.toast(`키우미집에서 ${egg.label} 알을 데려왔다`)
+    }
+  }
+  await update($, pokedex, () => dex)
+  const next = eggsOf(sessions, dex, now)
+  // 30초마다 부르므로 그대로면 쓰지 않아 패널을 괜히 다시 그리지 않는다
+  await update($, eggs, prev => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+}
+
+// 포켓몬 그림과 이름은 PokeAPI 에서 처음 쓸 때 한 번 받아 이 폴더에 두고 다시 쓴다
+const SPRITE_DIR = '.claude/mod-hud-sprites'
+// 7세대 박스 아이콘. 처음부터 작게 그린 도트라 줄이지 않아도 돼 뭉개지지 않는다
+const spriteUrl = (species: number) =>
+  `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-vii/icons/${species}.png`
+const speciesUrl = (species: number) => `https://pokeapi.co/api/v2/pokemon-species/${species}`
+
+// 읽은 그림은 투명한 테두리를 잘라 둔다. null 은 받은 파일이 깨져 이 세션에서는 다시 읽지 않는 것
+const sprites = new Map<number, Pixels | null>()
+const fitted = new Map<string, Pixels>()
+const spritesLoading = new Set<number>()
+
+const lookupSprite: SpriteLookup = (species, size) => {
+  const key = `${species}:${size}`
+  const cached = fitted.get(key)
+  if (cached) {
+    return cached
+  }
+  const source = sprites.get(species)
+  if (!source) {
+    return undefined
+  }
+  const made = fit(source, size)
+  fitted.set(key, made)
+  return made
+}
+
+// 금 간 알과 박스에 보이는 포켓몬만 부른다. 받지 못하면 그동안 몬스터볼을 그리고 다음 그릴 때 다시 받는다
+async function loadSprite($: EngineInterface, species: number) {
+  if (sprites.has(species) || spritesLoading.has(species)) {
+    return
+  }
+  spritesLoading.add(species)
+  try {
+    const home = await $.env.get('HOME')
+    if (!home) {
+      return
+    }
+    const path = `${home}/${SPRITE_DIR}/icons/${species}.png`
+    if (!(await $.fs.exists(path))) {
+      const got = await $.process.run(['curl', '-fsSL', '--create-dirs', '-o', path, spriteUrl(species)])
+      if (got.exitCode !== 0) {
+        return
+      }
+    }
+    const { base64 } = await $.fs.read(path, { as: 'bytes' })
+    // 엔진의 Uint8Array 는 fromBase64 를 갖지만 TypeScript 의 lib 에는 아직 없다
+    const bytes = (Uint8Array as unknown as { fromBase64(text: string): Uint8Array }).fromBase64(base64)
+    try {
+      sprites.set(species, crop(decodePng(bytes)))
+    } catch {
+      // 받다 끊긴 파일은 지워 다음 세션에서 다시 받게 한다
+      sprites.set(species, null)
+      await $.process.run(['rm', '-f', path])
+    }
+  } catch {
+    // 네트워크나 파일을 못 쓰면 몬스터볼로 둔다
+  } finally {
+    spritesLoading.delete(species)
+  }
+}
+
+// 한국어 이름. 못 받으면 도감 번호로 부른다
+async function pokemonName($: EngineInterface, home: string, species: number): Promise<string> {
+  const path = `${home}/${SPRITE_DIR}/names.json`
+  let names: Record<string, string> = {}
+  try {
+    names = JSON.parse(await $.fs.read(path)) as Record<string, string>
+  } catch {
+    // 처음이면 파일이 없다
+  }
+  const known = names[species]
+  if (known) {
+    return known
+  }
+  try {
+    const res = await $.http.fetch(speciesUrl(species))
+    const parsed = res.ok ? (JSON.parse(res.text) as { names?: { name: string; language: { name: string } }[] }) : null
+    const name = parsed?.names?.find(one => one.language.name === 'ko')?.name
+    if (name) {
+      await $.fs.write(path, JSON.stringify({ ...names, [species]: name }))
+      return name
+    }
+  } catch {
+    // 이름을 못 받아도 토스트는 띄운다
+  }
+  return `No.${species}`
+}
+
+// 패널이 그린 알과 박스의 크기와 내용. 패널이 그릴 때마다 바꾸고, 칠할 수 없으면 비운다
+let nestScene: { columns: number; rows: number; input: NestInput } | null = null
+// 보고 있는 박스 페이지. 0부터 센다
+let boxPage = 0
+let nestFrame = 0
+// 그림이 보일 때만 돈다. 패널이 닫히거나 입력창 위로 옮겨 칠할 곳이 없으면 멈춘다
+let nestTimer: ReturnType<EngineInterface['clock']['every']> | null = null
+// 그린 직후에는 Raster 가 아직 화면에 붙지 않아 칠하기를 거절할 수 있어, 몇 번 거절이 이어질 때만 멈춘다
+let nestDenied = 0
+const NEST_DENY_LIMIT = 8
+
+function nestCells(scene: { columns: number; input: NestInput }, now: number): string {
+  // 엔진의 Uint8Array 는 toBase64 를 갖지만 TypeScript 의 lib 에는 아직 없다
+  const bytes = new Uint8Array(drawNest(scene.input, scene.columns, nestFrame, now, lookupSprite).buffer) as Uint8Array & {
+    toBase64(): string
+  }
+  return bytes.toBase64()
+}
+
+function startNest($: EngineInterface) {
+  nestDenied = 0
+  nestTimer ??= $.clock.every(NEST_TICK_MS, () => void tickNest($))
+}
+
+function stopNest() {
+  nestScene = null
+  nestTimer?.cancel()
+  nestTimer = null
+}
+
+// 박스 페이지를 앞뒤로 넘긴다. 끝에서 넘기면 처음으로 돌아간다
+function turnBox($: EngineInterface, delta: number) {
+  if (!nestScene) {
+    return
+  }
+  const pages = boxPages(nestScene.input, nestScene.columns)
+  boxPage = (boxPageOf(nestScene.input, nestScene.columns) + delta + pages) % pages
+  $.ui.invalidate('ui.render')
+}
+
+async function tickNest($: EngineInterface) {
+  if (!nestScene) {
+    stopNest()
+    return
+  }
+  nestFrame += 1
+  const painted = await $.ui.blit({ requestId: PANE, key: 'nest', cells: nestCells(nestScene, await $.clock.now()) })
+  nestDenied = painted.deny ? nestDenied + 1 : 0
+  if (nestDenied >= NEST_DENY_LIMIT) {
+    stopNest()
   }
 }
 
@@ -616,7 +911,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'mod-hud',
-      description: '세션과 이슈 상태 패널을 열거나 닫는다',
+      description: '세션과 이슈 상태 패널을 열거나 닫는다. dashboard 를 붙이면 이 세션을 포켓몬 알에서 빼거나 다시 넣는다',
     })
     await writeStatus($, { state: 'waiting' })
     $.clock.every(HEARTBEAT_MS, () => void heartbeat($))
@@ -638,7 +933,17 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('command.run', { command: 'mod-hud' }, async $ => {
+  on('command.run', { command: 'mod-hud' }, async ($, e) => {
+    if (e.args.trim() === 'dashboard') {
+      const isDashboard = !mine?.isDashboard
+      await writeStatus($, { isDashboard })
+      void refreshSessions($)
+      return {
+        text: isDashboard
+          ? '이 세션을 대시보드로 표시했다. 포켓몬 알이 생기지 않는다.'
+          : '대시보드 표시를 풀었다. 이 세션의 알이 다시 생긴다.',
+      }
+    }
     if (await isPaneUp($)) {
       await $.ui.close({ id: PANE })
       return { text: '패널을 닫았다.' }
@@ -654,7 +959,9 @@ export const register: Register = (on, options) => {
     const now = await $.clock.now()
     const background = pendingTasks(await backgroundTasks($), now, finishedTaskIds(e.text))
     const base = { state: 'working' as const, attention: null, workingSince: now, background, waitingOnTasks: false }
-    await writeStatus($, prompt ? { ...base, prompt } : base)
+    // 리뷰 세션은 이어서 다른 요청을 받아도 리뷰 세션이므로 표시를 남긴다
+    const review = isCodeReviewPrompt(prompt) ? { isCodeReview: true } : {}
+    await writeStatus($, prompt ? { ...base, ...review, prompt } : base)
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -715,7 +1022,10 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   on('session.end', async ($, e, next) => {
-    await writeStatus($, { state: 'ended' })
+    await writeStatus($, { state: 'ended', endReason: e.reason })
+    if (e.reason === 'clear' || e.reason === 'resume') {
+      handoff = { id: e.sessionId, isDashboard: mine?.isDashboard === true }
+    }
     // /clear 는 새 id 로 이어지고 session.start 가 다시 오지 않아, 새 세션을 처음부터 쓰게 비운다
     if (e.reason === 'clear') {
       mine = null
@@ -727,12 +1037,14 @@ export const register: Register = (on, options) => {
   on('classic.SessionStart', async ($, e, next) => {
     transcriptPath = e.transcript_path || null
     // 이어 연 세션은 이미 이름이 있다
+    const inherited = handoff ? { predecessor: handoff.id, isDashboard: handoff.isDashboard } : {}
+    handoff = null
     if (e.source === 'resume') {
-      await writeStatus($, { title: await readTitle($) })
+      await writeStatus($, { title: await readTitle($), ...inherited })
     }
     if (e.source === 'clear') {
       mine = null
-      await writeStatus($, { state: 'waiting' })
+      await writeStatus($, { state: 'waiting', ...inherited })
       // 상태 파일만 읽고 git 은 돌리지 않아 /clear 를 오래 붙잡지 않는다
       await refreshSessions($)
       if (await ensureRepo($)) {
@@ -850,7 +1162,10 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Text } = $.ui.resolve(e)
+    const elements = $.ui.resolve(e)
+    const { Box, Button, Text } = elements
+    // Raster 는 터미널만 그린다
+    const Raster = 'Raster' in elements ? elements.Raster : null
     const issueRows = await read($, rows)
     const mrOf = await read($, branchMrs)
     // 세션 한 줄. 줄 전체를 Text 하나로 그려야 패널 폭을 넘을 때 빈 줄로 접히지 않고 끝이 잘린다
@@ -896,198 +1211,237 @@ export const register: Register = (on, options) => {
       </Text>
     )
 
+    // 알과 박스는 옆에 붙은 패널에만 그린다. 입력창 위에 뜬 패널은 높이를 아껴야 한다
+    const hasNest = Raster !== null && e.props.placement === 'dock' && e.props.bodyColumns >= 20
+    if (hasNest) {
+      const dex = await read($, pokedex)
+      const input = { eggs: await read($, eggs), daycare: dex.daycare, box: dex.box, boxPage }
+      nestScene = { columns: e.props.bodyColumns, rows: nestRows(input, e.props.bodyColumns), input }
+      for (const species of speciesToLoad(input, e.props.bodyColumns)) {
+        void loadSprite($, species)
+      }
+      startNest($)
+    } else {
+      nestScene = null
+    }
+
     return (
-      <Box flexDirection="column">
-        {/* 세션 목록은 30초마다 읽어 늘 최신이라, 묵을 수 있는 GitLab 과 Linear 조회 시각만 보인다 */}
+      <Box flexDirection="column" justifyContent="space-between" minHeight={hasNest ? e.props.scroll.bodyRows : undefined}>
         <Box flexDirection="column">
-          {repo?.api && (
-            <Text dimColor>
-              {ICON.mr} GitLab {issues.isRefreshing ? '조회 중' : freshness(issues.refreshedAt, ISSUES_TTL_MS, now)}
-            </Text>
-          )}
-          {/* Linear 를 연결하지 않았으면 조회 시각도 보이지 않는다 */}
-          {notes.isOk && (
-            <Text dimColor>
-              {ICON.inbox} Linear {freshness(notes.fetchedAt, INBOX_TTL_MS, now)}
-            </Text>
-          )}
-          <Button key="refresh" label="지금 새로고침" onPress={() => refreshAll($)} />
-        </Box>
-
-        {notes.isOk && (
-          <Box flexDirection="column" marginTop={1}>
-            {/* 안 읽은 게 없으면 문구 대신 (-) 로 비었음을 보인다 */}
-            {heading('inbox', `Linear Inbox (${notes.items.length || '-'})`)}
-            {notes.items.slice(0, INBOX_SHOWN).map(item => (
-              <Box key={item.id} flexDirection="column">
-                {/* 제목이 길면 제목 끝을 자르고, 시각은 칸을 고정해 세로로 꺾이지 않게 한다 */}
-                <Box>
-                  <Text>  </Text>
-                  <Box flexShrink={1}>
-                    <Button plain key={`inbox-${item.id}`} onPress={() => openUrl($, item.url)}>
-                      <Text wrap="truncate-end">
-                        <Text bold>{item.issue ?? categoryLabel(item)}</Text>
-                        <Text> {item.title}</Text>
-                      </Text>
-                    </Button>
-                  </Box>
-                  <Box flexShrink={0}>
-                    <Text dimColor> {formatAgoShort(now - item.createdAt)}</Text>
-                  </Box>
-                </Box>
-                {item.subtitle && (
-                  <Text dimColor wrap="truncate-end">
-                    {'    '}› {item.subtitle}
-                  </Text>
-                )}
-              </Box>
-            ))}
-            {notes.items.length > INBOX_SHOWN && <Text dimColor>  외 {notes.items.length - INBOX_SHOWN}개</Text>}
+          {/* 세션 목록은 30초마다 읽어 늘 최신이라, 묵을 수 있는 GitLab 과 Linear 조회 시각만 보인다 */}
+          <Box flexDirection="column">
+            {repo?.api && (
+              <Text dimColor>
+                {ICON.mr} GitLab {issues.isRefreshing ? '조회 중' : freshness(issues.refreshedAt, ISSUES_TTL_MS, now)}
+              </Text>
+            )}
+            {/* Linear 를 연결하지 않았으면 조회 시각도 보이지 않는다 */}
+            {notes.isOk && (
+              <Text dimColor>
+                {ICON.inbox} Linear {freshness(notes.fetchedAt, INBOX_TTL_MS, now)}
+              </Text>
+            )}
+            <Button key="refresh" label="지금 새로고침" onPress={() => refreshAll($)} />
           </Box>
-        )}
 
-        <Box flexDirection="column" marginTop={1}>
-          {heading('mine', '내 차례', sessions.mine.length)}
-          {sessions.mine.length === 0 && <Text dimColor>  나를 기다리는 세션이 없다</Text>}
-          {sessions.mine.map(entry => {
-            const kind = entry.attention?.kind ?? 'answered'
-            const detail = kind === 'answered' ? entry.prompt : (entry.attention?.text ?? entry.prompt)
-            return (
+          {notes.isOk && (
+            <Box flexDirection="column" marginTop={1}>
+              {/* 안 읽은 게 없으면 문구 대신 (-) 로 비었음을 보인다 */}
+              {heading('inbox', `Linear Inbox (${notes.items.length || '-'})`)}
+              {notes.items.slice(0, INBOX_SHOWN).map(item => (
+                <Box key={item.id} flexDirection="column">
+                  {/* 제목이 길면 제목 끝을 자르고, 시각은 칸을 고정해 세로로 꺾이지 않게 한다 */}
+                  <Box>
+                    <Text>  </Text>
+                    <Box flexShrink={1}>
+                      <Button plain key={`inbox-${item.id}`} onPress={() => openUrl($, item.url)}>
+                        <Text wrap="truncate-end">
+                          <Text bold>{item.issue ?? categoryLabel(item)}</Text>
+                          <Text> {item.title}</Text>
+                        </Text>
+                      </Button>
+                    </Box>
+                    <Box flexShrink={0}>
+                      <Text dimColor> {formatAgoShort(now - item.createdAt)}</Text>
+                    </Box>
+                  </Box>
+                  {item.subtitle && (
+                    <Text dimColor wrap="truncate-end">
+                      {'    '}› {item.subtitle}
+                    </Text>
+                  )}
+                </Box>
+              ))}
+              {notes.items.length > INBOX_SHOWN && <Text dimColor>  외 {notes.items.length - INBOX_SHOWN}개</Text>}
+            </Box>
+          )}
+
+          <Box flexDirection="column" marginTop={1}>
+            {heading('mine', '내 차례', sessions.mine.length)}
+            {sessions.mine.length === 0 && <Text dimColor>  나를 기다리는 세션이 없다</Text>}
+            {sessions.mine.map(entry => {
+              const kind = entry.attention?.kind ?? 'answered'
+              const detail = kind === 'answered' ? entry.prompt : (entry.attention?.text ?? entry.prompt)
+              return (
+                <Box key={entry.id} flexDirection="column">
+                  {sessionRow(
+                    entry,
+                    <Text color={ATTENTION[kind].color}>
+                      {'  '}
+                      {ATTENTION[kind].mark} {ATTENTION[kind].label}{' '}
+                    </Text>,
+                    <Text dimColor> {formatFor(now - entry.since)}</Text>,
+                  )}
+                  {detail && (
+                    <Text dimColor wrap="truncate-end">
+                      {'    '}› {detail}
+                    </Text>
+                  )}
+                </Box>
+              )
+            })}
+          </Box>
+
+          <Box flexDirection="column" marginTop={1}>
+            {heading('running', '진행 중', sessions.running.length)}
+            {sessions.running.length === 0 && <Text dimColor>  일하는 세션이 없다</Text>}
+            {sessions.running.map(entry => (
               <Box key={entry.id} flexDirection="column">
                 {sessionRow(
                   entry,
-                  <Text color={ATTENTION[kind].color}>
-                    {'  '}
-                    {ATTENTION[kind].mark} {ATTENTION[kind].label}{' '}
+                  <Text>  </Text>,
+                  <Text>
+                    {entry.todos && (
+                      <Text color={COLOR.running}>
+                        {' '}
+                        {entry.todos.done}/{entry.todos.total}
+                      </Text>
+                    )}
+                    {entry.check && !entry.check.isOk && <Text color="red"> {entry.check.name} 실패</Text>}
+                    <Text dimColor> {formatFor(now - entry.since)}</Text>
                   </Text>,
-                  <Text dimColor> {formatFor(now - entry.since)}</Text>,
                 )}
-                {detail && (
+                {(entry.todos?.current ?? entry.prompt) && (
                   <Text dimColor wrap="truncate-end">
-                    {'    '}› {detail}
+                    {'    '}› {entry.todos?.current ?? entry.prompt}
                   </Text>
                 )}
               </Box>
-            )
-          })}
-        </Box>
+            ))}
+          </Box>
 
-        <Box flexDirection="column" marginTop={1}>
-          {heading('running', '진행 중', sessions.running.length)}
-          {sessions.running.length === 0 && <Text dimColor>  일하는 세션이 없다</Text>}
-          {sessions.running.map(entry => (
-            <Box key={entry.id} flexDirection="column">
-              {sessionRow(
-                entry,
-                <Text>  </Text>,
-                <Text>
-                  {entry.todos && (
-                    <Text color={COLOR.running}>
-                      {' '}
-                      {entry.todos.done}/{entry.todos.total}
+          {mrs.length > 0 && (
+            <Box flexDirection="column" marginTop={1}>
+              {heading('mr', 'MR', mrs.length)}
+              {mrs.map(row => (
+                <Box key={row.path}>
+                  <Text>  </Text>
+                  <Button plain key={`mr-${row.path}`} onPress={() => openUrl($, row.mr?.url)}>
+                    <Text bold color={COLOR.mr}>
+                      !{row.mr?.iid}
                     </Text>
-                  )}
-                  {entry.check && !entry.check.isOk && <Text color="red"> {entry.check.name} 실패</Text>}
-                  <Text dimColor> {formatFor(now - entry.since)}</Text>
-                </Text>,
-              )}
-              {(entry.todos?.current ?? entry.prompt) && (
-                <Text dimColor wrap="truncate-end">
-                  {'    '}› {entry.todos?.current ?? entry.prompt}
-                </Text>
+                    {/* 머지 가능한 MR 은 Worktree 섹션과 같은 말로 상태만 적는다 */}
+                    <Text color={row.mr?.action === 'conflict' ? 'red' : COLOR.mr}>
+                      {' '}
+                      {row.mr?.action === 'conflict' ? '충돌, rebase 필요' : 'opened'}
+                    </Text>
+                    <Text bold> {row.branch ?? row.issue ?? ''}</Text>
+                  </Button>
+                </Box>
+              ))}
+            </Box>
+          )}
+
+          {repo && (
+            <Box flexDirection="column" marginTop={1}>
+              {heading('issues', 'Worktree')}
+              {issueRows.map(row => (
+                <Box key={row.path} flexDirection="column">
+                  <Box>
+                    <Text bold>  {row.issue ? `#${row.issue}` : (row.branch ?? 'detached')}</Text>
+                    {row.isMain && <Text dimColor> (main)</Text>}
+                    {row.linear && <Text color={COLOR.inbox}> {row.linear}</Text>}
+                  </Box>
+                  {/* 둘째 줄은 브랜치와 커밋 수, 그 옆에 MR. 이슈가 없으면 첫 줄이 이미 브랜치라 커밋 수만 적는다 */}
+                  <Box>
+                    <Text dimColor wrap="truncate-end">
+                      {'    '}
+                      {row.issue && row.branch ? `${row.branch}  ` : ''}
+                      {row.ahead} commits{row.dirty > 0 ? `, 변경 ${row.dirty}` : ''}
+                    </Text>
+                    {row.mr && <Text> </Text>}
+                    {row.mr && (
+                      <Button plain key={`issue-mr-${row.path}`} onPress={() => openUrl($, row.mr?.url)}>
+                        <Text color={row.mr.state === 'merged' ? 'green' : row.mr.state === 'opened' ? COLOR.mr : 'gray'}>
+                          !{row.mr.iid} {row.mr.state}
+                        </Text>
+                      </Button>
+                    )}
+                  </Box>
+                  {row.note && <Text color="yellow">    {row.note}</Text>}
+                </Box>
+              ))}
+              {issues.log.length > 0 && (
+                <Box flexDirection="column" marginTop={1}>
+                  {issues.log.map(line => (
+                    <Text dimColor>  {line}</Text>
+                  ))}
+                </Box>
               )}
             </Box>
-          ))}
-        </Box>
+          )}
 
-        {mrs.length > 0 && (
-          <Box flexDirection="column" marginTop={1}>
-            {heading('mr', 'MR', mrs.length)}
-            {mrs.map(row => (
-              <Box key={row.path}>
-                <Text>  </Text>
-                <Button plain key={`mr-${row.path}`} onPress={() => openUrl($, row.mr?.url)}>
-                  <Text bold color={COLOR.mr}>
-                    !{row.mr?.iid}
-                  </Text>
-                  {/* 머지 가능한 MR 은 Worktree 섹션과 같은 말로 상태만 적는다 */}
-                  <Text color={row.mr?.action === 'conflict' ? 'red' : COLOR.mr}>
-                    {' '}
-                    {row.mr?.action === 'conflict' ? '충돌, rebase 필요' : 'opened'}
-                  </Text>
-                  <Text bold> {row.branch ?? row.issue ?? ''}</Text>
-                </Button>
-              </Box>
-            ))}
-          </Box>
-        )}
-
-        {repo && (
-          <Box flexDirection="column" marginTop={1}>
-            {heading('issues', 'Worktree')}
-            {issueRows.map(row => (
-              <Box key={row.path} flexDirection="column">
-                <Box>
-                  <Text bold>  {row.issue ? `#${row.issue}` : (row.branch ?? 'detached')}</Text>
-                  {row.isMain && <Text dimColor> (main)</Text>}
-                  {row.linear && <Text color={COLOR.inbox}> {row.linear}</Text>}
-                </Box>
-                {/* 둘째 줄은 브랜치와 커밋 수, 그 옆에 MR. 이슈가 없으면 첫 줄이 이미 브랜치라 커밋 수만 적는다 */}
-                <Box>
+          {sessions.idle.length > 0 && (
+            <Box flexDirection="column" marginTop={1}>
+              <Text dimColor bold>
+                ○ 빈 대기 {sessions.idle.length}
+              </Text>
+              {/* 제목과 어디서 열어 둔 것인지를 두 줄로 나눈다. 줄마다 넘치면 끝을 자른다 */}
+              {sessions.idle.map(entry => (
+                <Box key={entry.id} flexDirection="column">
                   <Text dimColor wrap="truncate-end">
-                    {'    '}
-                    {row.issue && row.branch ? `${row.branch}  ` : ''}
-                    {row.ahead} commits{row.dirty > 0 ? `, 변경 ${row.dirty}` : ''}
+                    {'  '}
+                    {entry.title ?? entry.label}
+                    {!entry.title && ` ${formatFor(now - entry.since)}`}
                   </Text>
-                  {row.mr && <Text> </Text>}
-                  {row.mr && (
-                    <Button plain key={`issue-mr-${row.path}`} onPress={() => openUrl($, row.mr?.url)}>
-                      <Text color={row.mr.state === 'merged' ? 'green' : row.mr.state === 'opened' ? COLOR.mr : 'gray'}>
-                        !{row.mr.iid} {row.mr.state}
-                      </Text>
-                    </Button>
+                  {entry.title && (
+                    <Text dimColor wrap="truncate-end">
+                      {'    '}
+                      {entry.label} {formatFor(now - entry.since)}
+                    </Text>
                   )}
                 </Box>
-                {row.note && <Text color="yellow">    {row.note}</Text>}
-              </Box>
-            ))}
-            {issues.log.length > 0 && (
-              <Box flexDirection="column" marginTop={1}>
-                {issues.log.map(line => (
-                  <Text dimColor>  {line}</Text>
-                ))}
+              ))}
+            </Box>
+          )}
+
+          {hidden.length > 0 && (
+            <Box marginTop={1}>
+              <Text dimColor>숨김: {hidden.join(', ')}</Text>
+            </Box>
+          )}
+        </Box>
+        {/* 남는 높이를 띄워 알과 박스를 패널 바닥에 붙인다. 내용이 길면 내용 바로 아래에 온다 */}
+        {nestScene && Raster && (
+          <Box marginTop={1} flexDirection="column">
+            {/* 부화한 포켓몬은 세션을 닫지 않아도 박스로 보낼 수 있다 */}
+            {eggsOnScreen(nestScene.input, nestScene.columns)
+              .filter(egg => egg.stage === 'hatched')
+              .map(egg => (
+                <Button key={`send-${egg.key}`} label={`박스로 보내기 · ${egg.label}`} onPress={() => sendToBox($, egg.key)} />
+              ))}
+            <Raster key="nest" columns={nestScene.columns} rows={nestScene.rows} cells={nestCells(nestScene, now)} />
+            {boxPages(nestScene.input, nestScene.columns) > 1 && (
+              <Box justifyContent="center">
+                <Button key="box-prev" label="◀ 이전" onPress={() => turnBox($, -1)} />
+                <Text dimColor>
+                  {'  '}
+                  {boxPageOf(nestScene.input, nestScene.columns) + 1} / {boxPages(nestScene.input, nestScene.columns)}
+                  {'  '}
+                </Text>
+                <Button key="box-next" label="다음 ▶" onPress={() => turnBox($, 1)} />
               </Box>
             )}
-          </Box>
-        )}
-
-        {sessions.idle.length > 0 && (
-          <Box flexDirection="column" marginTop={1}>
-            <Text dimColor bold>
-              ○ 빈 대기 {sessions.idle.length}
-            </Text>
-            {/* 제목과 어디서 열어 둔 것인지를 두 줄로 나눈다. 줄마다 넘치면 끝을 자른다 */}
-            {sessions.idle.map(entry => (
-              <Box key={entry.id} flexDirection="column">
-                <Text dimColor wrap="truncate-end">
-                  {'  '}
-                  {entry.title ?? entry.label}
-                  {!entry.title && ` ${formatFor(now - entry.since)}`}
-                </Text>
-                {entry.title && (
-                  <Text dimColor wrap="truncate-end">
-                    {'    '}
-                    {entry.label} {formatFor(now - entry.since)}
-                  </Text>
-                )}
-              </Box>
-            ))}
-          </Box>
-        )}
-
-        {hidden.length > 0 && (
-          <Box marginTop={1}>
-            <Text dimColor>숨김: {hidden.join(', ')}</Text>
           </Box>
         )}
       </Box>

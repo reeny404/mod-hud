@@ -8,6 +8,7 @@ import {
   finishedTaskIds,
   firstLine,
   freshness,
+  isCodeReviewSession,
   isQuestion,
   launchedTaskId,
   pendingTasks,
@@ -190,4 +191,20 @@ test('끝난 작업과 너무 오래된 작업은 진행 중에서 뺀다', () =
     { id: 'old', at: NOW - BACKGROUND_MAX_MS },
   ]
   expect(pendingTasks(tasks, NOW, ['a']).map(task => task.id)).toEqual(['b'])
+})
+
+test('iTerm2 Code Review 탭이 띄운 세션은 목록에서 빼고 개수에도 넣지 않는다', () => {
+  const review = 'Review the pending changes in this repo. Flag issues a caref…'
+  const board = triage(
+    [
+      session({ id: 'r', state: 'working', prompt: review }),
+      session({ id: 's', state: 'waiting', prompt: '다른 요청', isCodeReview: true }),
+      session({ id: 'w', state: 'working', prompt: '일해줘' }),
+    ],
+    null,
+    NOW,
+  )
+  expect(board.running.map(entry => entry.id)).toEqual(['w'])
+  expect([...board.mine, ...board.idle]).toEqual([])
+  expect(isCodeReviewSession({ prompt: '이 repo 리뷰해줘' })).toBe(false)
 })

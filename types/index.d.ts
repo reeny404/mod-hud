@@ -39,6 +39,16 @@ export type SessionStatus = TreeSession & {
   background?: BackgroundTask[]
   // 턴은 끝났고 백그라운드 작업만 기다리는 중. heartbeat 가 작업이 끝났는지 다시 본다
   waitingOnTasks?: boolean
+  // 이 세션 브랜치의 MR 상태(opened, merged, closed). 포켓몬 알이 금 가고 부화하는 기준이다
+  mrState?: string | null
+  // /mod-hud dashboard 로 대시보드라고 표시한 세션. 포켓몬 알이 없다
+  isDashboard?: boolean
+  // iTerm2 Claude Code 연동의 Code Review 탭이 띄운 리뷰 세션. 목록과 포켓몬 알에서 뺀다
+  isCodeReview?: boolean
+  // 세션이 끝난 이유(prompt_input_exit, clear, resume 등)
+  endReason?: string
+  // /clear 나 /resume 로 이 세션 직전에 같은 창에서 끝난 세션 id. 그 세션의 알을 물려받는다
+  predecessor?: string
 }
 
 // 백그라운드 Bash 의 backgroundTaskId 나 백그라운드 Agent 의 agentId 와 띄운 시각
@@ -126,6 +136,43 @@ export type InboxCache = {
 
 export type Inbox = { items: InboxItem[]; fetchedAt: number | null; isOk: boolean }
 
+// 세션 하나의 포켓몬 알. key 는 세션 id, species 는 1세대 도감 번호
+export type DexEgg = { key: string; species: number; root: string; branch: string | null; label: string; at: number }
+
+// 박스로 간 포켓몬
+export type BoxEntry = DexEgg
+
+// 모든 저장소와 세션이 같이 쓰는 ~/.claude/mod-hud-pokedex.json. 살아 있는 세션 중 id 가 가장 작은 세션만 쓴다
+export type Pokedex = {
+  // 세션 id 와 그 세션의 MR 이 처음 머지된 걸 본 시각
+  hatched: Record<string, number>
+  // 세션은 닫혔지만 MR 이 열려 있어 머지를 기다리는 알
+  pending: Array<DexEgg & { mrState: string }>
+  // MR 없이 닫힌 세션의 알. 같은 브랜치로 세션을 다시 열면 돌아간다
+  daycare: DexEgg[]
+  // 최근에 잡은 것이 앞
+  box: BoxEntry[]
+  // 키우미집에서 데려간 알. 세션 id 와 종
+  claims: Record<string, number>
+  // 이미 정리한 닫힌 세션 id
+  done: string[]
+  // 세션이 열린 채 박스로 보내기를 누른 횟수와 그때의 브랜치. 보낸 뒤 그 세션에는 새 알이 생긴다
+  sent: Record<string, { count: number; branch: string | null }>
+}
+
+// 패널에 그릴 알 하나
+export type NestEgg = {
+  key: string
+  label: string
+  species: number
+  stage: 'egg' | 'cracked' | 'hatched'
+  isShaking: boolean
+  // 세션이 나를 기다리면 mine, 일하는 중이면 working. 라벨 색을 패널의 내 차례, 진행 중과 같게 칠한다
+  activity: 'mine' | 'working' | null
+  // 처음 머지된 걸 본 시각. 이 뒤 잠깐 동안 높이 뛴다
+  hatchedAt: number | null
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'mod-hud': {
@@ -135,6 +182,8 @@ declare module 'claude-code' {
       board: Board
       sessionsMeta: SessionsMeta
       inbox: Inbox
+      pokedex: Pokedex
+      eggs: NestEgg[]
     }
   }
 }

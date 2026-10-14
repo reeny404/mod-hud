@@ -10,6 +10,16 @@ export const PRUNE_MS = 24 * 60 * 60 * 1000
 
 const PROMPT_MAX = 60
 
+// iTerm2 Code Review 탭이 리뷰 세션에 보내는 기본 프롬프트의 첫머리
+const CODE_REVIEW_PROMPT = 'Review the pending changes in this repo'
+
+export const isCodeReviewPrompt = (prompt: string | null | undefined): boolean =>
+  prompt?.startsWith(CODE_REVIEW_PROMPT) === true
+
+// iTerm2 Code Review 탭이 띄운 세션. 표시가 없는 예전 상태 파일은 마지막 요청으로 알아본다
+export const isCodeReviewSession = (session: Pick<SessionStatus, 'isCodeReview' | 'prompt'>): boolean =>
+  session.isCodeReview === true || isCodeReviewPrompt(session.prompt)
+
 // 요청의 첫 줄만 짧게 남긴다
 export const firstLine = (text: string): string | null => {
   const line = text
@@ -152,7 +162,7 @@ export const triage = (
   const running: Array<[SessionStatus, number]> = []
   const idle: Array<[SessionStatus, number]> = []
   for (const session of sessions) {
-    if (session.id === ownId) {
+    if (session.id === ownId || isCodeReviewSession(session)) {
       continue
     }
     const liveness: Liveness = livenessOf(session, now)
