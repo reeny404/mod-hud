@@ -586,3 +586,20 @@ test('원본 그림은 줄이지 않고 반 블록으로 그린다', () => {
   expect(sizes[0]).toBeGreaterThanOrEqual(40)
   expect(drawPortrait(25, () => undefined)).toBe(null)
 })
+
+test('기운 알에는 한 칸짜리 돌기가 없다', () => {
+  for (let i = 0; i < 12; i++) {
+    for (const angle of [-25, -15, -10, 10, 15, 25]) {
+      const rows = eggSprite(`egg-${i}`, 'egg', angle)
+      const filled = (x: number, y: number) => (rows[y]?.[x] ?? '.') !== '.'
+      rows.forEach((row, y) =>
+        [...row].forEach((c, x) => {
+          if (c !== '.') {
+            const neighbours = [filled(x - 1, y), filled(x + 1, y), filled(x, y - 1), filled(x, y + 1)].filter(Boolean).length
+            expect(neighbours).toBeGreaterThanOrEqual(2)
+          }
+        }),
+      )
+    }
+  }
+})

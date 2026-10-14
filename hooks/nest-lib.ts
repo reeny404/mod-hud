@@ -645,6 +645,20 @@ export function eggSprite(key: string, stage: 'egg' | 'cracked', angle: number):
       return center === '.' ? 'e' : center
     }),
   )
+  // 이웃이 하나뿐인 칸은 돌리다 생긴 돌기라 지운다. 지우면 또 생길 수 있어 없을 때까지 되풀이한다
+  const neighbours = (x: number, y: number) =>
+    [grid[y]?.[x - 1], grid[y]?.[x + 1], grid[y - 1]?.[x], grid[y + 1]?.[x]].filter(c => c !== undefined && c !== '.').length
+  for (let changed = true; changed; ) {
+    changed = false
+    grid.forEach((row, y) =>
+      row.forEach((c, x) => {
+        if (c !== '.' && neighbours(x, y) < 2) {
+          row[x] = '.'
+          changed = true
+        }
+      }),
+    )
+  }
   // 1칸 외곽선은 돌리면 구멍이 나서, 모양만 돌리고 바깥 둘레를 외곽선으로 다시 칠한다
   const filled = (x: number, y: number) => (grid[y]?.[x] ?? '.') !== '.'
   const rows = grid.map((row, y) =>
