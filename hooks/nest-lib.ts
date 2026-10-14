@@ -113,20 +113,17 @@ const EGG_PALETTE = {
 }
 const EGG_WIDTH = EGG[0]!.length
 const EGG_HEIGHT = EGG.length
-// 금이 간 알의 지그재그 금
+// 금이 간 알의 금. 위에서 내려오다 아래에서 두 갈래로 갈라진다
 const CRACK = [
-  [1, 7],
-  [2, 6],
-  [3, 7],
-  [4, 8],
-  [5, 7],
+  [5, 2],
+  [6, 3],
+  [7, 4],
+  [7, 5],
   [6, 6],
-  [7, 7],
-  [8, 8],
+  [8, 6],
+  [5, 7],
   [9, 7],
-  [10, 6],
-  [11, 7],
-  [12, 8],
+  [6, 8],
 ] as const
 // 키우미집에 쌓이는 작은 알
 const MINI_EGG = ['..kk..', '.kwwk.', 'keeeek', 'kGGeek', 'kGeeGk', '.kssk.', '..kk..']
