@@ -1,7 +1,7 @@
 {
   "name": "mod-hud",
   "version": "0.2.0",
-  "description": "여러 Claude 세션의 상태(내 차례, 진행 중)와 저장소 worktree 별 커밋, MR, Linear 상태를 한 패널과 입력창 위 한 줄로 보인다",
+  "description": "여러 Claude 세션의 상태(내 차례, 진행 중)와 저장소 worktree 별 커밋, MR, Linear 상태를 한 패널과 입력창 위 한 줄로 보이고, 세션마다 MR 이 머지되면 깨지는 포켓몬 알을 키운다",
   "author": {
     "name": "siann"
   },
