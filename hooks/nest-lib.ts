@@ -928,11 +928,24 @@ export function daycareGroundRows(hasWalker: boolean): number {
 }
 
 // 키우미집 풀밭과 맡긴 작은 알. 알이 없어도 그린다
-// walker 는 앞장선 포켓몬 그림. 주면 풀밭을 높여 그 포켓몬이 좌우로 걷게 한다. null 이면 풀밭만 높이고 아무도 걷지 않는다
-export function drawDaycareGround(daycare: HeldEgg[], width: number, frame: number, walker?: Pixels | null): Uint32Array {
+// walker 는 맡긴 포켓몬 그림. 주면 풀밭을 높여 그 포켓몬이 좌우로 걷게 한다. null 이면 풀밭만 높이고 아무도 걷지 않는다
+// before 는 막 진화한 포켓몬의 진화 전 그림. 주면 걷지 않고 가운데 서서 진화 전과 뒤 모습을 번갈아 보이며 반짝인다
+export function drawDaycareGround(
+  daycare: HeldEgg[],
+  width: number,
+  frame: number,
+  walker?: Pixels | null,
+  before?: Pixels | null,
+): Uint32Array {
   const ground = canvasOf(width, daycareGroundRows(walker !== undefined) * 2)
   drawDaycare(ground, daycare, frame)
-  if (walker) {
+  if (walker && before) {
+    // 원작처럼 두 프레임마다 진화 전과 뒤 모습을 번갈아 그린다
+    const image = Math.floor(frame / 2) % 2 === 0 ? before : walker
+    const x = Math.floor((width - image.width) / 2)
+    blit(ground, x, ground.height - image.height, image)
+    drawSparkles(ground, x - 2, 0, image.width + 4, ground.height, frame)
+  } else if (walker) {
     // 오른쪽 끝에서 왼쪽으로 한 칸씩 걷다가 끝에 닿으면 돌아온다. 아이콘은 왼쪽을 보므로 오른쪽으로 갈 때 뒤집는다
     const range = Math.max(1, width - walker.width)
     const step = frame % (range * 2)

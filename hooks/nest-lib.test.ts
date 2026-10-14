@@ -662,3 +662,27 @@ test('앞장선 포켓몬은 키우미집 풀밭을 통통 튀며 좌우로 걷�
   }
   expect(new Set(frames.slice(0, 4).map(rowsOf)).size).toBeGreaterThan(1)
 })
+
+test('맡긴 포켓몬이 진화하는 동안은 풀밭 가운데 멈춰 서서 진화 전과 뒤 모습을 번갈아 보인다', () => {
+  const OLD = 0x111111
+  const NEW = 0x222222
+  const now = { width: 2, height: 2, px: [NEW, NEW, NEW, NEW] }
+  const before = { width: 2, height: 2, px: [OLD, OLD, OLD, OLD] }
+  const width = 20
+  const columnsOf = (cells: Uint32Array, color: number) => {
+    const xs: number[] = []
+    for (let i = 0; i < cells.length; i += 3) {
+      if (cells[i + 1] === color || cells[i + 2] === color) {
+        xs.push((i / 3) % width)
+      }
+    }
+    return xs
+  }
+  const frames = [0, 1, 2, 3, 4, 5, 6, 7].map(frame => drawDaycareGround([], width, frame, now, before))
+  // 진화 전과 뒤 모습이 모두 보인다
+  expect(frames.some(cells => columnsOf(cells, OLD).length > 0)).toBe(true)
+  expect(frames.some(cells => columnsOf(cells, NEW).length > 0)).toBe(true)
+  // 걷지 않고 가운데 서 있다
+  const xs = new Set(frames.map(cells => Math.min(...columnsOf(cells, OLD), ...columnsOf(cells, NEW))))
+  expect([...xs]).toEqual([9])
+})

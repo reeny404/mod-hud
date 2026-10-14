@@ -115,7 +115,7 @@ test('옆에 붙은 패널은 DAY CARE 머리줄에 맡긴 포켓몬과 경험�
 
 test('다른 세션이 조금 전에 적은 진화도 이 패널이 처음 보면 그 칸의 페이지로 넘겨 보인다', async ($, on) => {
   mock.clock(on, { now: NOW })
-  const dex: Pokedex = { ...emptyPokedex(), box: [entry('a', 19, 1), entry('b', 6, 2), entry('c', 16, 3), entry('d', 20, 4)], lead: 'a', xp: 0, evolving: { key: 'd', from: 19, at: NOW - 20_000 } }
+  const dex: Pokedex = { ...emptyPokedex(), box: [entry('a', 19, 1), entry('b', 6, 2), entry('c', 16, 3), entry('d', 20, 4)], lead: null, xp: 0, evolving: { key: 'd', from: 19, at: NOW - 20_000 } }
   on('env.get', () => ({ value: '/home/test' }))
   on('fs.exists', ($, e) => ({ value: (e as unknown as { path: string }).path.endsWith('mod-hud-pokedex.json') }))
   on('fs.list', () => ({ value: [] }))
@@ -145,5 +145,7 @@ test('다른 세션이 조금 전에 적은 진화도 이 패널이 처음 보�
   const pane = await $.ui.mount({ plugin: 'mod-hud', surface: 'terminal', component: 'Pane', requestId: 'mod-hud', props } as never)
   // 기록을 쓰는 세션이 20초 전에 적은 진화라도 이 패널은 처음 보므로 넘겨서 깜빡인다
   expect(await pane.find({ type: 'Text', text: /PC BOX  2\/2/ })).toBeDefined()
+  // 최종 진화형이 되어 맡긴 포켓몬이 풀려도, 진화 장면을 보이는 동안은 풀밭에 그 포켓몬이 서 있다
+  expect(nodes(await pane.drawn(), 'Raster', { key: 'daycare', rows: 6 }).length).toBe(1)
   await pane.unmount()
 })

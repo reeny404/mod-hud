@@ -888,6 +888,8 @@ const EVOLVING_FRESH_MS = 60 * 1000
 let boxHeader: { count: number; lead: string | null } = { count: 0, lead: null }
 // PC BOX 를 접었는지. 접으면 머리줄만 보인다
 let boxCollapsed = false
+// 마지막으로 그린 키우미집 풀밭 줄 수. 칠할 때 줄 수가 바뀌었으면 다시 그린다
+let daycareRowsDrawn = 0
 // 키우미집을 접었는지. 접으면 머리줄의 맡긴 포켓몬 경험치와 남은 알 수만 보인다
 let daycareCollapsed = false
 // 박스 칸에 마우스를 올리면 뜨는 카드의 글자. 칸 key 로 찾는다
@@ -914,16 +916,24 @@ function nestCells(scene: { columns: number; input: NestInput }, now: number): s
   return base64Of(drawNest(scene.input, scene.columns, nestFrame, now, lookupSprite))
 }
 
-// 앞장선 포켓몬. 키우미집 풀밭을 걸어다닌다
-function walkerOf(scene: { input: NestInput }): BoxEntry | undefined {
-  return scene.input.box.find(entry => entry.key === scene.input.lead)
+// 막 진화해 진화 장면을 보이는 중인 포켓몬. 최종 진화형이 되어 맡긴 것이 풀렸어도 장면이 끝날 때까지 풀밭에 선다
+function evolvingOf(scene: { input: NestInput }, now: number): BoxEntry | undefined {
+  const evolving = scene.input.evolving
+  return evolving && now - evolving.at < EVOLVE_MS ? scene.input.box.find(entry => entry.key === evolving.key) : undefined
 }
 
-function daycareCells(scene: { columns: number; input: NestInput }): string {
-  const lead = walkerOf(scene)
-  // 앞장이 있으면 그림을 아직 못 불러왔어도 풀밭 높이는 미리 맞춘다
+// 키우미집에 맡긴 포켓몬. 풀밭을 걸어다닌다
+function walkerOf(scene: { input: NestInput }, now: number): BoxEntry | undefined {
+  return evolvingOf(scene, now) ?? scene.input.box.find(entry => entry.key === scene.input.lead)
+}
+
+function daycareCells(scene: { columns: number; input: NestInput }, now: number): string {
+  const lead = walkerOf(scene, now)
+  // 맡긴 포켓몬이 있으면 그림을 아직 못 불러왔어도 풀밭 높이는 미리 맞춘다
   const walker = lead ? (lookupSprite(lead.species, WALKER_SIZE) ?? null) : undefined
-  return base64Of(drawDaycareGround(scene.input.daycare, scene.columns, nestFrame, walker))
+  const evolving = evolvingOf(scene, now) && scene.input.evolving
+  const before = evolving ? (lookupSprite(evolving.from, WALKER_SIZE) ?? null) : null
+  return base64Of(drawDaycareGround(scene.input.daycare, scene.columns, nestFrame, walker, before))
 }
 
 // 이번 박스 페이지의 칸. 한 줄을 늘 꽉 채워 그리고, 포켓몬이 없는 칸은 null 이다
@@ -974,10 +984,15 @@ async function tickNest($: EngineInterface) {
   }
   nestFrame += 1
   const now = await $.clock.now()
+  // 진화 장면이 끝나 풀밭에 설 포켓몬이 사라지면 풀밭 높이가 바뀌므로 칠하지 않고 다시 그린다
+  if (!daycareCollapsed && daycareGroundRows(walkerOf(nestScene, now) !== undefined) !== daycareRowsDrawn) {
+    $.ui.invalidate('ui.render')
+    return
+  }
   // 알 줄이 있으면 알 그림을, 키우미집을 펼쳤으면 풀밭을 칠한다. 칠할 것이 없으면 거절도 세지 않는다
   const painted = [
     nestScene.rows > 0 ? await $.ui.blit({ requestId: PANE, key: 'nest', cells: nestCells(nestScene, now) }) : null,
-    daycareCollapsed ? null : await $.ui.blit({ requestId: PANE, key: 'daycare', cells: daycareCells(nestScene) }),
+    daycareCollapsed ? null : await $.ui.blit({ requestId: PANE, key: 'daycare', cells: daycareCells(nestScene, now) }),
   ].filter(one => one !== null)
   // 막 진화한 박스 칸만 깜빡이므로 그 칸만 다시 칠한다
   const evolving = nestScene.input.evolving
@@ -1419,7 +1434,8 @@ export const register: Register = (on, options) => {
         })
       }
       const walking = dex.box.find(entry => entry.key === dex.lead)
-      for (const species of [...speciesToLoad(input, e.props.bodyColumns), ...(walking ? [walking.species] : [])]) {
+      const walkers = [...(walking ? [walking.species] : []), ...(evolving ? [evolving.from] : [])]
+      for (const species of [...speciesToLoad(input, e.props.bodyColumns), ...walkers]) {
         void loadSprite($, species)
       }
       startNest($)
@@ -1660,8 +1676,8 @@ export const register: Register = (on, options) => {
               <Raster
                 key="daycare"
                 columns={nestScene.columns}
-                rows={daycareGroundRows(walkerOf(nestScene) !== undefined)}
-                cells={daycareCells(nestScene)}
+                rows={(daycareRowsDrawn = daycareGroundRows(walkerOf(nestScene, now) !== undefined))}
+                cells={daycareCells(nestScene, now)}
               />
             )}
             <Box backgroundColor="#3a6ea5" width={nestScene.columns} paddingX={1} marginTop={1}>
