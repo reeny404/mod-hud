@@ -1666,7 +1666,9 @@ export const register: Register = (on, options) => {
                         {boxCards.get(entry.key)!.next && <Text>→ {boxCards.get(entry.key)!.next}</Text>}
                         {entry.key === nestScene!.input.lead && <Text color="#ffe080">{boxHeader.lead}</Text>}
                         {boxCards.get(entry.key)!.canLead && (
-                          <Button key={`lead-${entry.key}`} label="Set as lead" onPress={() => pickLead($, entry.key)} />
+                          <Box justifyContent="center" width="100%">
+                            <Button key={`lead-${entry.key}`} label="Set as lead" onPress={() => pickLead($, entry.key)} />
+                          </Box>
                         )}
                       </Box>
                     )}

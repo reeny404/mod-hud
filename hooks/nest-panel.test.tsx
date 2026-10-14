@@ -71,6 +71,9 @@ test('옆에 붙은 패널은 PC BOX 머리줄에 앞장선 포켓몬과 경험�
   expect(await pane.find({ type: 'Text', text: /→ Pidgeotto/ })).toBeDefined()
   const tree = await pane.drawn()
   expect(nodes(tree, 'Button', { key: 'lead-c' }).length).toBe(1)
+  // Set as lead 버튼도 카드 가운데에 놓는다
+  const centered = nodes(tree, 'Box', { justifyContent: 'center', width: '100%' })
+  expect(centered.some(box => nodes(box, 'Button', { key: 'lead-c' }).length === 1)).toBe(true)
   expect(nodes(tree, 'Button', { key: 'lead-a' }).length).toBe(0)
   expect(nodes(tree, 'Button', { key: 'lead-b' }).length).toBe(0)
   // 카드는 패널 안에 들어가게 놓는다. 폭 60, 칸 20 이면 칸은 0, 20, 40 에 있고 카드 폭은 42 다
