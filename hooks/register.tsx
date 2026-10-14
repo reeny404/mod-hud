@@ -918,6 +918,15 @@ function tileCells(scene: { columns: number; input: NestInput }, entry: BoxEntry
   return base64Of(drawBoxTile(entry, entry !== null && entry.key === lead, evolving, nestFrame, now, lookupSprite))
 }
 
+// 마우스 카드의 폭과 칸 기준 왼쪽 위치. 칸 가운데에 두되 패널 밖으로 나가지 않게 당긴다. 칸 줄은 가운데 정렬이다
+function cardPlace(columns: number, i: number): { width: number; left: number } {
+  const width = Math.min(CARD_COLUMNS, columns)
+  const tileX = Math.floor((columns - boxPerRow(columns) * TILE) / 2) + i * TILE
+  const centered = Math.floor((TILE - width) / 2)
+  // -tileX 는 tileX 가 0 일 때 -0 이 되어 0 - tileX 로 쓴다
+  return { width, left: Math.max(0 - tileX, Math.min(centered, columns - width - tileX)) }
+}
+
 // 진화할 수 있는 박스 포켓몬을 박스 순서대로 앞뒤로 골라 앞장세운다
 function turnLead($: EngineInterface, delta: number) {
   if (!nestScene) {
@@ -1637,8 +1646,8 @@ export const register: Register = (on, options) => {
                     <Box
                       position="absolute"
                       bottom={TILE_ROWS}
-                      left={i < boxTiles(nestScene!).length / 2 ? 0 : TILE - CARD_COLUMNS}
-                      width={CARD_COLUMNS}
+                      left={cardPlace(nestScene!.columns, i).left}
+                      width={cardPlace(nestScene!.columns, i).width}
                       display="none"
                       hover={{ display: 'flex' }}
                       flexDirection="column"
