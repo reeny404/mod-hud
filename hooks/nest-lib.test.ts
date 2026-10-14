@@ -7,7 +7,6 @@ import {
   boxPages,
   CELEBRATE_MS,
   DAILY_EGGS,
-  DEX_SIZE,
   drawNest,
   eggsOf,
   emptyPokedex,
@@ -21,6 +20,7 @@ import {
   updatePending,
 } from './nest-lib'
 import type { SpriteLookup } from './nest-lib'
+import { EGG_SPECIES } from './dex-data'
 
 const ROOT = '/p/momochi'
 const NOW = 10 * 60 * 60 * 1000
@@ -114,12 +114,11 @@ test('일하는 세션의 알만 흔들리고, 부화한 뒤에는 흔들리지 
   expect(eggsOf(sessions, dex, NOW).map(egg => egg.isShaking)).toEqual([true, false, false])
 })
 
-test('같은 세션은 늘 같은 포켓몬이고, 세션이 다르면 1세대 151마리에 고르게 퍼진다', () => {
+test('같은 알은 늘 같은 포켓몬이고, 알이 다르면 알에서 나오는 74종에 고르게 퍼진다', () => {
   expect(speciesOf('abc')).toBe(speciesOf('abc'))
-  const seen = new Set(Array.from({ length: 3000 }, (_, i) => speciesOf(`session-${i}`)))
-  expect(seen.size).toBe(DEX_SIZE)
-  expect(Math.min(...seen)).toBe(1)
-  expect(Math.max(...seen)).toBe(DEX_SIZE)
+  const seen = new Set(Array.from({ length: 2000 }, (_, i) => speciesOf(`session-${i}`)))
+  expect([...seen].every(species => EGG_SPECIES.includes(species))).toBe(true)
+  expect(seen.size).toBeGreaterThan(60)
 })
 
 test('열린 세션 중 id 가 가장 작은 세션 하나만 기록을 쓴다', () => {

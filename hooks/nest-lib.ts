@@ -6,6 +6,7 @@
 // 포켓몬은 1세대 도감 번호로만 정해 두고, 그림은 MR 이 열리거나 박스를 열 때 불러온 스프라이트로 그린다
 
 import type { BoxEntry, DexEgg, HeldEgg, NestEgg, Pokedex, SessionStatus } from '../types'
+import { EGG_SPECIES } from './dex-data'
 import { isLongLivedBranch, parseIssue } from './issues-lib'
 import type { Pixels } from './png-lib'
 import { CLEAR } from './png-lib'
@@ -20,7 +21,6 @@ export type NestInput = { eggs: Egg[]; daycare: HeldEgg[]; box: BoxEntry[]; boxP
 // 불러온 스프라이트를 size 안에 들어가게 줄여 준다. 아직 없으면 undefined
 export type SpriteLookup = (species: number, size: number) => Pixels | undefined
 
-export const DEX_SIZE = 151
 // 박스 아이콘 도트는 대부분 이보다 작아 줄이지 않고 그대로 그린다. 정수 배가 아니게 줄이면 도트가 뭉개져 더 줄이지 않는다
 export const HATCHED_SIZE = 24
 export const ICON_SIZE = 24
@@ -138,7 +138,7 @@ const WOBBLE = [0, -1, 1, -1, 1, 0, 0, 0, 0, 0, 0, 0]
 const HOP = [0, 1, 2, 1, 0, 0, 0, 0]
 const HOP_HIGH = [0, 2, 4, 2, 0, 0]
 
-function hash(text: string): number {
+export function hash(text: string): number {
   let n = 2166136261
   for (let i = 0; i < text.length; i++) {
     n = Math.imul(n ^ text.charCodeAt(i), 16777619)
@@ -146,9 +146,9 @@ function hash(text: string): number {
   return n >>> 0
 }
 
-// 알 key 마다 정해지는 1세대 도감 번호
+// 알 key 마다 정해지는 도감 번호. 알에서는 진화 전 모습만 나온다
 export function speciesOf(key: string): number {
-  return (hash(key) % DEX_SIZE) + 1
+  return EGG_SPECIES[hash(key) % EGG_SPECIES.length]!
 }
 
 // 키우미집에 매일 새로 채우는 알 수
