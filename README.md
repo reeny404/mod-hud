@@ -25,6 +25,9 @@ Sections whose requirements aren't met are simply hidden.
 
 ![Eggs, DAY CARE and PC BOX at the bottom of the panel](docs/images/nest.png)
 
+<img width="1274" height="794" alt="스크린샷 2026-10-14 오후 8 06 12" src="https://github.com/user-attachments/assets/7c25d9ab-7441-4145-8879-c0c7cecbbb9c" />
+
+
 At the bottom of the docked panel there is one nest per open session.
 
 - **DAY CARE (키우미집)**: refilled with 7 eggs every day at local midnight (leftovers don't carry over). The remaining count is always shown, `0` when empty. A session that starts working takes one egg. When it is empty the session stays an empty nest, and when an egg comes back a working empty session takes it. Click the DAY CARE header to fold the grass away and keep only the count.
