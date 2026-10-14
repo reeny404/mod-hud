@@ -798,29 +798,75 @@ async function loadSprite($: EngineInterface, species: number) {
   }
 }
 
-// 영어 이름. 못 받으면 도감 번호로 부른다
-async function pokemonName($: EngineInterface, home: string, species: number): Promise<string> {
-  const path = `${home}/${SPRITE_DIR}/names-en.json`
-  let names: Record<string, string> = {}
-  try {
-    names = JSON.parse(await $.fs.read(path)) as Record<string, string>
-  } catch {
-    // 처음이면 파일이 없다
+// 영어 이름. 파일에서 한 번 읽어 메모리에 두고, 모르는 이름은 PokeAPI 에서 받아 파일에 더한다
+const names = new Map<number, string>()
+// 이 세션에서 받으려다 실패한 종. 패널을 그릴 때마다 네트워크를 다시 부르지 않는다
+const namesFailed = new Set<number>()
+const namesLoading = new Map<number, Promise<string | null>>()
+let namesRead: Promise<void> | null = null
+
+function readNames($: EngineInterface, home: string): Promise<void> {
+  namesRead ??= (async () => {
+    try {
+      const saved = JSON.parse(await $.fs.read(`${home}/${SPRITE_DIR}/names-en.json`)) as Record<string, string>
+      for (const [species, name] of Object.entries(saved)) {
+        names.set(Number(species), name)
+      }
+    } catch {
+      // 처음이면 파일이 없다
+    }
+  })()
+  return namesRead
+}
+
+function fetchName($: EngineInterface, home: string, species: number): Promise<string | null> {
+  const loading = namesLoading.get(species)
+  if (loading) {
+    return loading
   }
-  const known = names[species]
+  const made = (async () => {
+    try {
+      const res = await $.http.fetch(speciesUrl(species))
+      const parsed = res.ok ? (JSON.parse(res.text) as { names?: { name: string; language: { name: string } }[] }) : null
+      const name = parsed?.names?.find(one => one.language.name === 'en')?.name
+      if (!name) {
+        namesFailed.add(species)
+        return null
+      }
+      names.set(species, name)
+      await $.fs.write(`${home}/${SPRITE_DIR}/names-en.json`, JSON.stringify(Object.fromEntries(names)))
+      return name
+    } catch {
+      namesFailed.add(species)
+      return null
+    } finally {
+      namesLoading.delete(species)
+    }
+  })()
+  namesLoading.set(species, made)
+  return made
+}
+
+// 토스트에 쓰는 이름. 받을 때까지 기다리고, 못 받으면 도감 번호로 부른다
+async function pokemonName($: EngineInterface, home: string, species: number): Promise<string> {
+  await readNames($, home)
+  const known = names.get(species) ?? (namesFailed.has(species) ? null : await fetchName($, home, species))
+  return known ?? `No.${species}`
+}
+
+// 패널에 쓰는 이름. 기다리지 않고 지금 아는 이름을 쓰며, 모르면 도감 번호로 그리고 받은 뒤 다시 그린다
+async function shownName($: EngineInterface, home: string, species: number): Promise<string> {
+  await readNames($, home)
+  const known = names.get(species)
   if (known) {
     return known
   }
-  try {
-    const res = await $.http.fetch(speciesUrl(species))
-    const parsed = res.ok ? (JSON.parse(res.text) as { names?: { name: string; language: { name: string } }[] }) : null
-    const name = parsed?.names?.find(one => one.language.name === 'en')?.name
-    if (name) {
-      await $.fs.write(path, JSON.stringify({ ...names, [species]: name }))
-      return name
-    }
-  } catch {
-    // 이름을 못 받아도 토스트는 띄운다
+  if (!namesFailed.has(species)) {
+    void fetchName($, home, species).then(name => {
+      if (name) {
+        $.ui.invalidate('ui.render')
+      }
+    })
   }
   return `No.${species}`
 }
@@ -1337,16 +1383,16 @@ export const register: Register = (on, options) => {
       const lead = dex.box.find(entry => entry.key === dex.lead)
       boxHeader = {
         count: dex.box.length,
-        lead: lead ? `★ ${await pokemonName($, home, lead.species)} ${xpBar(dex.xp)} ${xpLeft(dex.xp)}` : null,
+        lead: lead ? `★ ${await shownName($, home, lead.species)} ${xpBar(dex.xp)} ${xpLeft(dex.xp)}` : null,
         canLead: dex.box.some(entry => canEvolve(entry.species)),
       }
       boxCards = new Map()
       for (const entry of boxOnPage(input, columns)) {
         const next = evolutionOf(entry)
         boxCards.set(entry.key, {
-          name: await pokemonName($, home, entry.species),
+          name: await shownName($, home, entry.species),
           caught: localDay(entry.at),
-          next: next === null ? null : await pokemonName($, home, next),
+          next: next === null ? null : await shownName($, home, next),
           canLead: next !== null && entry.key !== dex.lead,
         })
       }
