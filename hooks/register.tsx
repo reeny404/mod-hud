@@ -44,7 +44,8 @@ import {
   parseWorktrees,
   readEnvValue,
 } from './issues-lib'
-import { advanceEvolution, evolutionOf, xpBar, xpLeft } from './evolve-lib'
+import { canEvolve } from './dex-data'
+import { advanceEvolution, xpBar, xpLeft } from './evolve-lib'
 import {
   advancePokedex,
   boxOnPage,
@@ -890,7 +891,7 @@ let boxCollapsed = false
 // 키우미집을 접었는지. 접으면 머리줄의 남은 알 수만 보인다
 let daycareCollapsed = false
 // 박스 칸에 마우스를 올리면 뜨는 카드의 글자. 칸 key 로 찾는다
-let boxCards = new Map<string, { name: string; caught: string; next: string | null; canLead: boolean }>()
+let boxCards = new Map<string, { name: string; caught: string; canLead: boolean }>()
 // 카드 폭. 원본 아이콘 40칸과 테두리
 const CARD_COLUMNS = 42
 // 카드는 아래 화면 위에 겹쳐 뜨므로 빈 칸까지 이 색으로 칠해 비치지 않게 한다
@@ -1410,12 +1411,11 @@ export const register: Register = (on, options) => {
       }
       boxCards = new Map()
       for (const entry of boxOnPage(input, columns)) {
-        const next = evolutionOf(entry)
+        // 다음 진화는 진화할 때까지 보이지 않는다
         boxCards.set(entry.key, {
           name: await shownName($, home, entry.species),
           caught: localDay(entry.at),
-          next: next === null ? null : await shownName($, home, next),
-          canLead: next !== null && entry.key !== dex.lead,
+          canLead: canEvolve(entry.species) && entry.key !== dex.lead,
         })
       }
       const walking = dex.box.find(entry => entry.key === dex.lead)
@@ -1714,7 +1714,6 @@ export const register: Register = (on, options) => {
                         })()}
                         <Text bold>{boxCards.get(entry.key)!.name}</Text>
                         <Text dimColor>caught {boxCards.get(entry.key)!.caught}</Text>
-                        {boxCards.get(entry.key)!.next && <Text>→ {boxCards.get(entry.key)!.next}</Text>}
                         {entry.key === nestScene!.input.lead && <Text color="#ffe080">{boxHeader.lead}</Text>}
                         {boxCards.get(entry.key)!.canLead && (
                           <Box justifyContent="center" width="100%">

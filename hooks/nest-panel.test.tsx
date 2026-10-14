@@ -67,8 +67,9 @@ test('옆에 붙은 패널은 PC BOX 머리줄에 앞장선 포켓몬과 경험�
   expect(nodes(await pane.drawn(), 'Button', { label: 'Lead ▶' }).length).toBe(0)
   expect(nodes(await pane.drawn(), 'Button', { label: '◀ Lead' }).length).toBe(0)
   // 칸마다 마우스를 올리면 뜨는 카드가 있다. 진화할 수 있고 앞장이 아닌 포켓몬에만 앞장세우기 버튼이 있다
-  expect(await pane.find({ type: 'Text', text: /→ Raticate/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /→ Pidgeotto/ })).toBeDefined()
+  // 카드에는 다음 진화를 미리 보이지 않는다
+  expect(await pane.find({ type: 'Text', text: /→/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /Raticate|Pidgeotto/ })).toBeUndefined()
   const tree = await pane.drawn()
   expect(nodes(tree, 'Button', { key: 'lead-c' }).length).toBe(1)
   // Set as lead 버튼도 카드 가운데에 놓는다
