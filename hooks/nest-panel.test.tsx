@@ -48,6 +48,8 @@ test('옆에 붙은 패널은 PC BOX 머리줄에 앞장선 포켓몬과 경험�
   expect(await pane.find({ type: 'Text', text: /→ Raticate/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /→ Pidgeotto/ })).toBeDefined()
   expect(await pane.find({ type: 'Button', key: 'lead-c' } as never)).toBeDefined()
+  // 카드는 아래 화면이 비치지 않게 배경을 칠하고 가운데 정렬한다
+  expect(await pane.find({ type: 'Box', backgroundColor: '#202020', alignItems: 'center' } as never)).toBeDefined()
   expect(await pane.find({ type: 'Button', key: 'lead-a' } as never)).toBeUndefined()
   expect(await pane.find({ type: 'Button', key: 'lead-b' } as never)).toBeUndefined()
   await pane.unmount()

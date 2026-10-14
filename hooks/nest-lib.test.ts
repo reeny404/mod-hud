@@ -30,6 +30,7 @@ import {
 } from './nest-lib'
 import type { SpriteLookup } from './nest-lib'
 import { EGG_SPECIES } from './dex-data'
+import { CLEAR } from './png-lib'
 
 const ROOT = '/p/momochi'
 const NOW = 10 * 60 * 60 * 1000
@@ -602,4 +603,17 @@ test('기운 알에는 한 칸짜리 돌기가 없다', () => {
       )
     }
   }
+})
+
+test('카드에 그리는 원본 그림은 빈 칸을 배경색으로 칠해 아래 화면이 비치지 않는다', () => {
+  const sparse: SpriteLookup = () => ({ width: 4, height: 3, px: [0x123456, ...Array.from({ length: 11 }, () => CLEAR)] })
+  const portrait = drawPortrait(25, sparse, 0x202020)!
+  expect(portrait.rows).toBe(2)
+  const cells = Array.from(portrait.cells)
+  // 셀마다 [글자, 앞색, 뒷색]. 투명한 칸이 하나도 없다
+  for (let i = 0; i < cells.length; i += 3) {
+    expect(cells[i + 1]).not.toBe(CLEAR)
+    expect(cells[i + 2]).not.toBe(CLEAR)
+  }
+  expect(cells.includes(0x202020)).toBe(true)
 })

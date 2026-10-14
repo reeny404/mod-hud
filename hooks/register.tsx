@@ -837,6 +837,9 @@ let boxHeader: { count: number; lead: string | null; canLead: boolean } = { coun
 let boxCards = new Map<string, { name: string; caught: string; next: string | null; canLead: boolean }>()
 // 카드 폭. 원본 아이콘 40칸과 테두리
 const CARD_COLUMNS = 42
+// 카드는 아래 화면 위에 겹쳐 뜨므로 빈 칸까지 이 색으로 칠해 비치지 않게 한다
+const CARD_BACKGROUND = 0x202020
+const CARD_BACKGROUND_HEX = '#202020'
 let nestFrame = 0
 // 그림이 보일 때만 돈다. 패널이 닫히거나 입력창 위로 옮겨 칠할 곳이 없으면 멈춘다
 let nestTimer: ReturnType<EngineInterface['clock']['every']> | null = null
@@ -1587,10 +1590,12 @@ export const register: Register = (on, options) => {
                       display="none"
                       hover={{ display: 'flex' }}
                       flexDirection="column"
+                      alignItems="center"
                       borderStyle="round"
+                      backgroundColor={CARD_BACKGROUND_HEX}
                     >
                       {(() => {
-                        const portrait = drawPortrait(entry.species, lookupSprite)
+                        const portrait = drawPortrait(entry.species, lookupSprite, CARD_BACKGROUND)
                         return (
                           portrait && (
                             <Raster key={`portrait-${i}`} columns={portrait.columns} rows={portrait.rows} cells={base64Of(portrait.cells)} />

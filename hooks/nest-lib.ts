@@ -867,12 +867,18 @@ export function boxOnPage(input: NestInput, width: number): BoxEntry[] {
 // 박스 아이콘의 원본 크기(7세대 아이콘은 40x30). 마우스를 올리면 뜨는 카드에 줄이지 않고 그린다
 const PORTRAIT_SIZE = 40
 
-export function drawPortrait(species: number, lookup: SpriteLookup): { columns: number; rows: number; cells: Uint32Array } | null {
+// background 를 주면 빈 칸을 그 색으로 칠한다. 겹쳐 뜨는 카드에 그려도 아래 화면이 비치지 않게 한다
+export function drawPortrait(
+  species: number,
+  lookup: SpriteLookup,
+  background: number = CLEAR,
+): { columns: number; rows: number; cells: Uint32Array } | null {
   const image = lookup(species, PORTRAIT_SIZE)
   if (!image) {
     return null
   }
   const canvas = canvasOf(image.width, image.height + (image.height % 2))
+  canvas.px.fill(background)
   blit(canvas, 0, 0, image)
   const out: number[] = []
   pixelCells(canvas, out)
