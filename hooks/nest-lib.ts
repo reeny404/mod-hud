@@ -211,6 +211,7 @@ export const emptyPokedex = (): Pokedex => ({
   seen: [],
   legends: [],
   evolving: null,
+  arrival: null,
 })
 
 export function parsePokedex(text: string): Pokedex {
@@ -223,6 +224,10 @@ export function parsePokedex(text: string): Pokedex {
     const isEvolving = (value: unknown): value is Pokedex['evolving'] => {
       const one = value as { key?: unknown; from?: unknown; at?: unknown } | null
       return typeof one?.key === 'string' && typeof one.from === 'number' && typeof one.at === 'number'
+    }
+    const isArrival = (value: unknown): value is Pokedex['arrival'] => {
+      const one = value as { species?: unknown; at?: unknown } | null
+      return typeof one?.species === 'number' && typeof one.at === 'number'
     }
     const record = <T>(value: unknown): Record<string, T> => (value && typeof value === 'object' ? (value as Record<string, T>) : {})
     // 옛 기록의 sent 는 { count, branch } 라 버린다
@@ -245,6 +250,7 @@ export function parsePokedex(text: string): Pokedex {
       seen: numbers(parsed.seen),
       legends: numbers(parsed.legends),
       evolving: isEvolving(parsed.evolving) ? parsed.evolving : null,
+      arrival: isArrival(parsed.arrival) ? parsed.arrival : null,
     }
   } catch {
     return emptyPokedex()

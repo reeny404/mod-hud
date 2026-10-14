@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { BoxEntry, Pokedex, SessionStatus } from '../types'
-import { advanceEvolution, autoLead, evolutionOf, XP_GAP_MS, XP_PER_EVOLUTION_MS, xpBar, xpLeft } from './evolve-lib'
+import { advanceEvolution, autoLead, evolutionOf, TAKE_BACK, XP_GAP_MS, XP_PER_EVOLUTION_MS, xpBar, xpLeft } from './evolve-lib'
 import { emptyPokedex, parsePokedex } from './nest-lib'
 
 const ROOT = '/p/momochi'
@@ -68,7 +68,7 @@ test('경험치가 많이 쌓여도 한 번에 한 단계만 진화하고 0 부�
   expect(dex.xp).toBe(0)
 })
 
-test('고른 포켓몬은 진화해도 계속 앞장서고 최종 진화형이 되면 풀린다', () => {
+test('맡긴 포켓몬은 최종 진화형이 되어도 데려올 때까지 키우미집에 남는다', () => {
   const box = [entry('old', 16, 0), entry('c', 4, 9)]
   const first = advanceEvolution(dexOf({ box, xp: XP_PER_EVOLUTION_MS }), [], NOW, 'c').dex
   expect(first.box.find(one => one.key === 'c')!.species).toBe(5)
@@ -76,8 +76,31 @@ test('고른 포켓몬은 진화해도 계속 앞장서고 최종 진화형이 �
   expect(first.chosen).toBe(true)
   const second = advanceEvolution({ ...first, xp: XP_PER_EVOLUTION_MS }, [], NOW).dex
   expect(second.box.find(one => one.key === 'c')!.species).toBe(6)
-  expect(second.lead).toBe(null)
-  expect(second.chosen).toBe(false)
+  expect(second.lead).toBe('c')
+  expect(second.chosen).toBe(true)
+})
+
+test('최종 진화형이 맡겨져 있으면 경험치가 쌓이지 않는다', () => {
+  const { dex } = advanceEvolution(dexOf({ box: [entry('z', 6), entry('p', 16, 5)], lead: 'z', chosen: true, xpAt: NOW - 60_000 }), [session('a')], NOW)
+  expect(dex.lead).toBe('z')
+  expect(dex.xp).toBe(0)
+})
+
+test('Take back 을 누르면 키우미집에서 데려오고 다른 포켓몬이 자동으로 맡겨진다', () => {
+  const box = [entry('z', 6, 0), entry('p', 16, 5)]
+  const { dex } = advanceEvolution(dexOf({ box, lead: 'z', chosen: true }), [], NOW, TAKE_BACK)
+  expect(dex.lead).toBe('p')
+  expect(dex.chosen).toBe(false)
+  // 맡길 포켓몬이 없으면 비어 있다
+  const alone = advanceEvolution(dexOf({ box: [entry('z', 6)], lead: 'z', chosen: true }), [], NOW, TAKE_BACK).dex
+  expect(alone.lead).toBe(null)
+})
+
+test('전설이 오면 모든 패널이 등장 장면을 보이게 기록에 남긴다', () => {
+  const { dex } = advanceEvolution(dexOf({ box: [entry('c', 5)], xp: XP_PER_EVOLUTION_MS }), [], NOW)
+  expect(dex.arrival).toEqual({ species: 146, at: NOW })
+  // 아무 일 없으면 그대로 둔다
+  expect(advanceEvolution(dex, [], NOW + 1000).dex.arrival).toEqual({ species: 146, at: NOW })
 })
 
 test('자동으로 고른 포켓몬은 진화해도 계속 앞장선다', () => {
@@ -144,6 +167,7 @@ test('예전 기록을 읽으면 도감은 박스로 채우고 박스에 있는 
   expect(old.seen).toEqual([])
   expect(old.legends).toEqual([])
   expect(old.evolving).toBe(null)
+  expect(old.arrival).toBe(null)
   const { dex, legends } = advanceEvolution(old, [], NOW)
   expect([...dex.seen].sort((a, b) => a - b)).toEqual([1, 150])
   expect(dex.legends).toContain(150)

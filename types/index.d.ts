@@ -180,6 +180,8 @@ export type Pokedex = {
   legends: number[]
   // 가장 최근 진화. 모든 세션의 패널이 깜빡임을 그리는 데 쓴다
   evolving: { key: string; from: number; at: number } | null
+  // 가장 최근에 온 전설. 모든 세션의 패널이 등장 장면을 보이는 데 쓴다
+  arrival: { species: number; at: number } | null
 }
 
 // 패널에 그릴 알 하나

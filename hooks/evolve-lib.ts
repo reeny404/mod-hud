@@ -13,6 +13,8 @@ export const XP_PER_EVOLUTION_MS = 3 * 60 * 60 * 1000
 export const XP_GAP_MS = 5 * 60 * 1000
 // 같은 종이 이만큼 모이면 자동으로 고를 때 그 종이 먼저 앞장선다
 const CROWD = 3
+// 키우미집에서 데려오기 요청. 맡길 포켓몬 key 대신 이 값을 보낸다
+export const TAKE_BACK = '-'
 const LEGEND_SPECIES: readonly number[] = Object.values(LEGENDS)
 
 // 진화하면 될 종. 이브이처럼 갈라지면 칸 key 로 골라 다시 계산해도 같다
@@ -38,7 +40,7 @@ export function autoLead(box: readonly BoxEntry[]): string | null {
   return firstCaught(crowded.length > 0 ? crowded : able)?.key ?? null
 }
 
-// pick 은 사용자가 앞장세우기를 누른 박스 칸의 key
+// pick 은 사용자가 Leave at DAY CARE 를 누른 박스 칸의 key, 또는 Take back 을 누른 TAKE_BACK
 // evolved 는 이번에 진화한 칸과 진화 전 종, legends 는 이번에 박스에 들어온 전설
 export function advanceEvolution(dex: Pokedex, sessions: readonly SessionStatus[], now: number, pick: string | null = null) {
   let box = [...dex.box]
@@ -47,25 +49,31 @@ export function advanceEvolution(dex: Pokedex, sessions: readonly SessionStatus[
   const evolved: Array<{ entry: BoxEntry; from: number }> = []
   const arrived: BoxEntry[] = []
 
+  const able = (key: string | null) => box.find(one => one.key === key && canEvolve(one.species))
+  let lead = dex.lead
+  let chosen = dex.chosen
+  if (pick === TAKE_BACK) {
+    lead = null
+    chosen = false
+  } else if (pick !== null && able(pick)) {
+    lead = pick
+    chosen = true
+  } else if (!box.some(one => one.key === lead)) {
+    // 맡긴 포켓몬은 최종 진화형이 되어도 데려올 때까지 남는다. 박스에서 사라졌을 때만 다시 고른다
+    lead = null
+    chosen = false
+  }
+  lead ??= autoLead(box)
+
+  // 최종 진화형이 맡겨져 있으면 더 진화할 수 없어 경험치를 쌓지 않는다
   let xp = dex.xp
-  if (dex.xpAt > 0 && now - dex.xpAt <= XP_GAP_MS) {
+  const isMaxed = lead !== null && !able(lead)
+  if (!isMaxed && dex.xpAt > 0 && now - dex.xpAt <= XP_GAP_MS) {
     // 권한 창이나 질문으로 나를 기다리는 세션은 상태가 working 이어도 일하지 않는 것으로 친다
     const working = sessions.filter(session => hasEgg(session) && livenessOf(session, now) === 'working' && !session.attention).length
     // 기록을 쓰는 세션이 바뀌며 시계가 조금 어긋나도 경험치가 줄지 않게 한다
     xp += Math.max(0, now - dex.xpAt) * working
   }
-
-  const able = (key: string | null) => box.find(one => one.key === key && canEvolve(one.species))
-  let lead = dex.lead
-  let chosen = dex.chosen
-  if (pick !== null && able(pick)) {
-    lead = pick
-    chosen = true
-  } else if (!able(lead)) {
-    lead = null
-    chosen = false
-  }
-  lead ??= autoLead(box)
 
   let evolving = dex.evolving
   const leader = able(lead)
@@ -77,12 +85,9 @@ export function advanceEvolution(dex: Pokedex, sessions: readonly SessionStatus[
     evolved.push({ entry: grown, from: leader.species })
     evolving = { key: leader.key, from: leader.species, at: now }
     xp = 0
-    if (!canEvolve(species)) {
-      lead = null
-      chosen = false
-    }
   }
 
+  let arrival = dex.arrival
   // 전설은 처음 조건을 채울 때 한 번만 온다. 저장소와 라벨은 진화한 칸, 없으면 박스 맨 앞 칸의 것을 쓴다
   const welcome = (species: number) => {
     const from = evolved[0]?.entry ?? box[0]
@@ -94,6 +99,7 @@ export function advanceEvolution(dex: Pokedex, sessions: readonly SessionStatus[
     legends.add(species)
     seen.add(species)
     arrived.push(entry)
+    arrival = { species, at: now }
   }
   for (const [legend, finals] of Object.entries(LEGEND_FINALS)) {
     if (evolved.some(one => finals.includes(one.entry.species))) {
@@ -117,6 +123,7 @@ export function advanceEvolution(dex: Pokedex, sessions: readonly SessionStatus[
     seen: [...seen],
     legends: [...legends],
     evolving,
+    arrival,
   }
   return { dex: next, evolved, legends: arrived }
 }
