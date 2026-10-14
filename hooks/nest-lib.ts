@@ -38,7 +38,7 @@ const DONE_MAX = 500
 const EGG_ROWS_MAX = 2
 
 // 알 칸과 부화한 포켓몬 칸의 폭, 그림 줄 수. 알만 있는 줄은 낮게, 포켓몬이 있는 줄만 높게 그린다
-const EGG_SLOT = 16
+const EGG_SLOT = 20
 const EGG_ROWS = 8
 const HATCHED_SLOT = 24
 const HATCHED_ROWS = 14
@@ -83,23 +83,36 @@ const C = {
   wallAlt: 0xbfe6cc,
 } as const
 
-// 4세대 알 스프라이트(28x30)를 절반으로 줄여 다시 찍은 것. 외곽선, 위쪽 하이라이트, 아래 그림자, 연두 반점
-const EGG = [
+// 알 몸통 14x13. 4세대 알 스프라이트를 둥글게 줄여 다시 찍은 것. 외곽선, 위쪽 하이라이트, 오른쪽 아래 그림자
+const EGG_BODY = [
   '.....kkkk.....',
-  '...kkwwwwkk...',
-  '..kewwwwwwek..',
-  '.keewwwwwweek.',
-  '.kGgeewweeeek.',
-  'kGGGeeeeeeeehk',
-  'kGGGGeeGGeeeek',
-  'kGGGeeeGGegGek',
-  'khgGeeeeeGGGhk',
-  'kheeeeeeeGGGgk',
-  'kseeeeeeegGGGk',
-  '.kshheeeehGDk.',
-  '.ksDDshhhssDk.',
-  '..kDDDsssssk..',
+  '...kkweeekk...',
+  '..kewweeeehk..',
+  '.keewweeeeehk.',
+  '.keeeeeeeeehk.',
+  'keeeeeeeeeehhk',
+  'keeeeeeeeeehhk',
+  'keeeeeeeeehhhk',
+  'keeeeeeeehhhhk',
+  'keeeeeeehhhhhk',
+  '.kssssssssssk.',
+  '..kksssssskk..',
   '....kkkkkk....',
+]
+// 연두 반점 무늬. 알마다 하나를 골라 몸통에 칠한다. (x, y) 는 몸통 폭과 키에 대한 비율, r 은 폭에 대한 비율인 원이다
+const SPOTS: ReadonlyArray<ReadonlyArray<readonly [number, number, number]>> = [
+  // 4세대 알의 무늬
+  [[0.12, 0.5, 0.2], [0.6, 0.5, 0.09], [0.8, 0.66, 0.16], [0.3, 0.9, 0.12], [0.84, 0.9, 0.05]],
+  // 점 셋
+  [[0.25, 0.4, 0.13], [0.7, 0.45, 0.13], [0.48, 0.78, 0.13]],
+  // 왼쪽에 크게
+  [[0.1, 0.55, 0.28], [0.75, 0.75, 0.08]],
+  // 사선으로 셋
+  [[0.25, 0.3, 0.1], [0.5, 0.55, 0.12], [0.78, 0.8, 0.14]],
+  // 오른쪽 위에 둘
+  [[0.7, 0.3, 0.16], [0.35, 0.72, 0.1]],
+  // 기본 알. 위 오른쪽, 왼쪽 큰 점, 오른쪽 아래, 아래
+  [[0.6, 0.27, 0.13], [0.2, 0.52, 0.17], [0.85, 0.6, 0.15], [0.42, 0.88, 0.15]],
 ]
 const EGG_PALETTE = {
   k: C.eggLine,
@@ -110,9 +123,8 @@ const EGG_PALETTE = {
   G: C.spot,
   g: C.spotLight,
   D: C.spotShade,
+  c: C.crack,
 }
-const EGG_WIDTH = EGG[0]!.length
-const EGG_HEIGHT = EGG.length
 // 금이 간 알의 금 모양들. 알마다 하나를 골라 그린다
 const CRACKS: ReadonlyArray<ReadonlyArray<readonly [number, number]>> = [
   // 위에서 내려오다 아래에서 두 갈래로 갈라진다
@@ -132,8 +144,11 @@ const MINI_SLOT = 7
 // 스프라이트를 아직 못 불러왔을 때 대신 그리는 몬스터볼
 const BALL = ['..rrrr..', '.rrrrrr.', 'rrrrrrrr', 'kkkwwkkk', 'wwwkkwww', 'wwwwwwww', '.wwwwww.', '..wwww..']
 const BALL_PALETTE = { r: C.ballRed, w: C.ballWhite, k: C.ballLine }
-// 알을 흔드는 박자. 몇 번 빠르게 흔들고 잠깐 쉰다
-const WOBBLE = [0, -1, 1, -1, 1, 0, 0, 0, 0, 0, 0, 0]
+// 일하는 세션의 알이 기우는 각도(도). 오뚝이처럼 크게 한 번, 작게 한 번 흔들리고 쉰다. 음수는 왼쪽이다
+const ROCK = [0, -15, -25, -15, 0, 15, 25, 15, 0, -10, 0, 10, 0, 0, 0, 0, 0, 0]
+// 기운 알을 담는 칸. 바닥 줄이 알의 바닥이고, 가장 크게 기울어도 잘리지 않는다
+const ROCK_WIDTH = 20
+const ROCK_HEIGHT = 15
 // 부화한 포켓몬이 통통 튀는 높이. 막 나왔을 때는 더 높이 뛴다
 const HOP = [0, 1, 2, 1, 0, 0, 0, 0]
 const HOP_HIGH = [0, 2, 4, 2, 0, 0]
@@ -548,8 +563,92 @@ function blit(canvas: Canvas, x: number, y: number, image: Pixels) {
   })
 }
 
-function drawEgg(canvas: Canvas, x: number, y: number) {
-  sprite(canvas, x, y, EGG, EGG_PALETTE)
+// 몸통에 알 key 로 고른 반점과, 금 간 알이면 금을 칠한다
+function paintedEgg(key: string, stage: 'egg' | 'cracked'): string[][] {
+  const width = EGG_BODY[0]!.length
+  const height = EGG_BODY.length
+  const spots = SPOTS[hash(`spots:${key}`) % SPOTS.length]!
+  const rows = EGG_BODY.map((row, y) =>
+    [...row].map((c, x) => {
+      if (c !== 'e' && c !== 'h' && c !== 's') {
+        return c
+      }
+      const hit = spots.some(([bx, by, r]) => {
+        const dx = (x + 0.5) / width - bx
+        const dy = ((y + 0.5) / height - by) * (height / width)
+        return dx * dx + dy * dy <= r * r
+      })
+      return hit ? (c === 's' ? 'D' : 'G') : c
+    }),
+  )
+  if (stage === 'cracked') {
+    // 프레임마다 바뀌지 않게 알 key 로 고른다
+    for (const [x, y] of CRACKS[hash(`crack:${key}`) % CRACKS.length]!) {
+      rows[y]![x] = 'c'
+    }
+  }
+  return rows
+}
+
+const eggSprites = new Map<string, string[]>()
+
+// 알 key 의 무늬와 금으로 칠한 알을 angle 도만큼 기울인 그림. ROCK_WIDTH x ROCK_HEIGHT 이고 바닥 줄이 알의 바닥이다
+export function eggSprite(key: string, stage: 'egg' | 'cracked', angle: number): string[] {
+  const id = `${key}:${stage}:${angle}`
+  const cached = eggSprites.get(id)
+  if (cached) {
+    return cached
+  }
+  const source = paintedEgg(key, stage)
+  const width = source[0]!.length
+  const height = source.length
+  // 아랫면 곡률 중심을 축으로 돌리고, 기운 쪽으로 조금 굴려 둥근 바닥이 둥지에 닿은 채 기울게 한다
+  const radius = width / 2 - 0.5
+  const a = (angle * Math.PI) / 180
+  const pivotX = width / 2
+  const pivotY = height - radius
+  const outX = ROCK_WIDTH / 2 + radius * a * 0.4
+  const outY = ROCK_HEIGHT - radius
+  const sample = (x: number, y: number) => {
+    const dx = x - outX
+    const dy = y - outY
+    const sx = Math.floor(dx * Math.cos(-a) - dy * Math.sin(-a) + pivotX)
+    const sy = Math.floor(dx * Math.sin(-a) + dy * Math.cos(-a) + pivotY)
+    return source[sy]?.[sx] ?? '.'
+  }
+  // 칸을 3x3 으로 나눠 반 넘게 알 안이면 칠한다. 한 점만 읽으면 테두리가 들쭉날쭉하다. 색은 칸 중심에서 읽는다
+  const grid = Array.from({ length: ROCK_HEIGHT }, (_, y) =>
+    Array.from({ length: ROCK_WIDTH }, (_, x) => {
+      let inside = 0
+      for (const oy of [1 / 6, 1 / 2, 5 / 6]) {
+        for (const ox of [1 / 6, 1 / 2, 5 / 6]) {
+          inside += sample(x + ox, y + oy) === '.' ? 0 : 1
+        }
+      }
+      if (inside < 5) {
+        return '.'
+      }
+      const center = sample(x + 0.5, y + 0.5)
+      return center === '.' ? 'e' : center
+    }),
+  )
+  // 1칸 외곽선은 돌리면 구멍이 나서, 모양만 돌리고 바깥 둘레를 외곽선으로 다시 칠한다
+  const filled = (x: number, y: number) => (grid[y]?.[x] ?? '.') !== '.'
+  const rows = grid.map((row, y) =>
+    row
+      .map((c, x) => {
+        if (c === '.') {
+          return '.'
+        }
+        if (!filled(x - 1, y) || !filled(x + 1, y) || !filled(x, y - 1) || !filled(x, y + 1)) {
+          return 'k'
+        }
+        return c === 'k' ? 'e' : c
+      })
+      .join(''),
+  )
+  eggSprites.set(id, rows)
+  return rows
 }
 
 // 반짝이는 별을 width x height 칸 안에 흩뿌린다
@@ -581,8 +680,8 @@ function drawSparkles(canvas: Canvas, x: number, y: number, width: number, heigh
 
 function drawSlot(canvas: Canvas, slotX: number, slot: number, egg: Egg, frame: number, now: number, lookup: SpriteLookup) {
   const floor = canvas.height - 1
-  const eggX = slotX + Math.floor((slot - EGG_WIDTH) / 2)
-  const eggTop = floor - EGG_HEIGHT
+  const eggX = slotX + Math.floor((slot - ROCK_WIDTH) / 2)
+  const eggTop = floor - ROCK_HEIGHT
   for (let dx = 1; dx < slot - 1; dx++) {
     put(canvas, slotX + dx, floor, dx % 2 === 0 ? C.nest : C.nestDark)
   }
@@ -605,15 +704,8 @@ function drawSlot(canvas: Canvas, slotX: number, slot: number, egg: Egg, frame: 
     }
     return
   }
-  const shift = egg.isShaking ? (WOBBLE[(frame + egg.key.length) % WOBBLE.length] ?? 0) : 0
-  drawEgg(canvas, eggX + shift, eggTop)
-  if (egg.stage === 'cracked') {
-    // 프레임마다 바뀌지 않게 알 key 로 고른다
-    const crack = CRACKS[hash(`crack:${egg.key}`) % CRACKS.length]!
-    for (const [dx, dy] of crack) {
-      put(canvas, eggX + shift + dx, eggTop + dy, C.crack)
-    }
-  }
+  const angle = egg.isShaking ? (ROCK[(frame + egg.key.length) % ROCK.length] ?? 0) : 0
+  sprite(canvas, eggX, eggTop, eggSprite(egg.key, egg.stage, angle), EGG_PALETTE)
 }
 
 // 박스는 많이 훑어보는 곳이라 아이콘을 움직이지 않는다

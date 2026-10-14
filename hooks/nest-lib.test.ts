@@ -8,6 +8,7 @@ import {
   CELEBRATE_MS,
   DAILY_EGGS,
   drawNest,
+  eggSprite,
   eggsOf,
   emptyPokedex,
   freshEggs,
@@ -489,10 +490,44 @@ test('박스가 한 페이지를 넘으면 페이지를 나누고, 페이지를 
 })
 
 test('금 간 알은 알마다 다섯 가지 금 중 하나로 그리고, 같은 알은 늘 같은 금이다', () => {
-  const draw = (key: string) => {
-    const egg = { key, label: 'x', species: 1, stage: 'cracked' as const, isShaking: false, activity: null, hatchedAt: null }
-    return Array.from(drawNest({ eggs: [egg], daycare: [], box: [], boxPage: 0 }, 40, 0, NOW, () => undefined)).join()
+  const crackOf = (key: string) =>
+    eggSprite(key, 'cracked', 0)
+      .flatMap((row, y) => [...row].map((c, x) => (c === 'c' ? `${x},${y}` : null)))
+      .filter(Boolean)
+      .join(' ')
+  expect(crackOf('a')).toBe(crackOf('a'))
+  expect(new Set(Array.from({ length: 40 }, (_, i) => crackOf(`egg-${i}`))).size).toBe(5)
+})
+
+test('알은 14x13 몸통에 여섯 무늬 중 하나로 그리고, 같은 알은 늘 같은 무늬다', () => {
+  expect(eggSprite('a', 'egg', 0)).toEqual(eggSprite('a', 'egg', 0))
+  expect(new Set(Array.from({ length: 200 }, (_, i) => eggSprite(`egg-${i}`, 'egg', 0).join('\n'))).size).toBe(6)
+  // 서 있는 알은 폭 14, 키 13 이다
+  const rows = eggSprite('a', 'egg', 0)
+  const painted = rows.flatMap((row, y) => [...row].flatMap((c, x) => (c === '.' ? [] : [[x, y] as const])))
+  expect(Math.max(...painted.map(([x]) => x)) - Math.min(...painted.map(([x]) => x)) + 1).toBe(14)
+  expect(Math.max(...painted.map(([, y]) => y)) - Math.min(...painted.map(([, y]) => y)) + 1).toBe(13)
+})
+
+test('기운 알도 외곽선에 구멍이 없고 바닥이 둥지에 닿으며 잘리지 않는다', () => {
+  for (const angle of [0, -25, -15, -10, 10, 15, 25]) {
+    const rows = eggSprite('egg-3', 'egg', angle)
+    const at = (x: number, y: number) => rows[y]?.[x] ?? '.'
+    expect(rows[rows.length - 1]!.includes('k')).toBe(true)
+    expect(rows[0]!.replace(/\./g, '')).toBe('')
+    expect(rows.every(row => row[0] === '.' && row[row.length - 1] === '.')).toBe(true)
+    rows.forEach((row, y) =>
+      [...row].forEach((c, x) => {
+        const isEdge = c !== '.' && [at(x - 1, y), at(x + 1, y), at(x, y - 1), at(x, y + 1)].includes('.')
+        if (isEdge) {
+          expect(c).toBe('k')
+        }
+      }),
+    )
   }
-  expect(draw('a')).toBe(draw('a'))
-  expect(new Set(Array.from({ length: 40 }, (_, i) => draw(`egg-${i}`))).size).toBe(5)
+})
+
+test('금 간 알은 기울어도 금이 보인다', () => {
+  expect(eggSprite('egg-1', 'cracked', 25).some(row => row.includes('c'))).toBe(true)
+  expect(eggSprite('egg-1', 'cracked', -25).some(row => row.includes('c'))).toBe(true)
 })
