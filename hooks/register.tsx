@@ -45,7 +45,6 @@ import {
   readEnvValue,
 } from './issues-lib'
 import { advanceEvolution, evolutionOf, xpBar, xpLeft } from './evolve-lib'
-import { canEvolve } from './dex-data'
 import {
   advancePokedex,
   boxOnPage,
@@ -882,7 +881,7 @@ let evolvingSeenAt = 0
 // 이보다 오래된 진화는 처음 봐도 깜빡이지 않는다. 다른 세션이 기록을 읽는 간격보다 넉넉하다
 const EVOLVING_FRESH_MS = 60 * 1000
 // PC BOX 머리줄. 한국어 대신 영어 이름이지만 ★ 와 막대는 Raster 가 못 그려 Text 로 그린다
-let boxHeader: { count: number; lead: string | null; canLead: boolean } = { count: 0, lead: null, canLead: false }
+let boxHeader: { count: number; lead: string | null } = { count: 0, lead: null }
 // 박스 칸에 마우스를 올리면 뜨는 카드의 글자. 칸 key 로 찾는다
 let boxCards = new Map<string, { name: string; caught: string; next: string | null; canLead: boolean }>()
 // 카드 폭. 원본 아이콘 40칸과 테두리
@@ -925,20 +924,6 @@ function cardPlace(columns: number, i: number): { width: number; left: number } 
   const centered = Math.floor((TILE - width) / 2)
   // -tileX 는 tileX 가 0 일 때 -0 이 되어 0 - tileX 로 쓴다
   return { width, left: Math.max(0 - tileX, Math.min(centered, columns - width - tileX)) }
-}
-
-// 진화할 수 있는 박스 포켓몬을 박스 순서대로 앞뒤로 골라 앞장세운다
-function turnLead($: EngineInterface, delta: number) {
-  if (!nestScene) {
-    return
-  }
-  const able = nestScene.input.box.filter(entry => canEvolve(entry.species))
-  if (able.length === 0) {
-    return
-  }
-  const at = able.findIndex(entry => entry.key === nestScene?.input.lead)
-  const next = able[(at < 0 ? 0 : at + delta + able.length) % able.length]!
-  void pickLead($, next.key)
 }
 
 function startNest($: EngineInterface) {
@@ -1399,7 +1384,6 @@ export const register: Register = (on, options) => {
       boxHeader = {
         count: dex.box.length,
         lead: lead ? `★ ${await shownName($, home, lead.species)} ${xpBar(dex.xp)} ${xpLeft(dex.xp)}` : null,
-        canLead: dex.box.some(entry => canEvolve(entry.species)),
       }
       boxCards = new Map()
       for (const entry of boxOnPage(input, columns)) {
@@ -1675,14 +1659,10 @@ export const register: Register = (on, options) => {
                 </Box>
               ))}
             </Box>
-            {(boxPages(nestScene.input, nestScene.columns) > 1 || boxHeader.canLead) && (
+            {boxPages(nestScene.input, nestScene.columns) > 1 && (
               <Box justifyContent="center">
-                {boxPages(nestScene.input, nestScene.columns) > 1 && (
-                  <Button key="box-prev" label="◀ Prev" onPress={() => turnBox($, -1)} />
-                )}
-                {boxPages(nestScene.input, nestScene.columns) > 1 && <Button key="box-next" label="Next ▶" onPress={() => turnBox($, 1)} />}
-                {boxHeader.canLead && <Button key="lead-prev" label="◀ Lead" onPress={() => turnLead($, -1)} />}
-                {boxHeader.canLead && <Button key="lead-next" label="Lead ▶" onPress={() => turnLead($, 1)} />}
+                <Button key="box-prev" label="◀ Prev" onPress={() => turnBox($, -1)} />
+                <Button key="box-next" label="Next ▶" onPress={() => turnBox($, 1)} />
               </Box>
             )}
           </Box>

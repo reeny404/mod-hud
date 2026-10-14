@@ -63,8 +63,9 @@ test('옆에 붙은 패널은 PC BOX 머리줄에 앞장선 포켓몬과 경험�
   // 폭 60 은 한 줄에 세 칸이고, 빈 칸도 벽으로 그린다
   expect(nodes(await pane.drawn(), 'Raster', { key: 'tile-2' }).length).toBe(1)
   expect(nodes(await pane.drawn(), 'Raster', { key: 'tile-3' }).length).toBe(0)
-  // 진화할 수 있는 포켓몬이 있으면 앞장을 고르는 버튼이 있다
-  expect(nodes(await pane.drawn(), 'Button', { label: 'Lead ▶' }).length).toBe(1)
+  // 앞장은 마우스 카드의 Set as lead 로만 고르고, 박스 아래 앞장 버튼은 없다
+  expect(nodes(await pane.drawn(), 'Button', { label: 'Lead ▶' }).length).toBe(0)
+  expect(nodes(await pane.drawn(), 'Button', { label: '◀ Lead' }).length).toBe(0)
   // 칸마다 마우스를 올리면 뜨는 카드가 있다. 진화할 수 있고 앞장이 아닌 포켓몬에만 앞장세우기 버튼이 있다
   expect(await pane.find({ type: 'Text', text: /→ Raticate/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /→ Pidgeotto/ })).toBeDefined()
