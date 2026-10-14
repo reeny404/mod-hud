@@ -118,3 +118,18 @@ export function advanceEvolution(dex: Pokedex, sessions: readonly SessionStatus[
   }
   return { dex: next, evolved, legends: arrived }
 }
+
+const BAR = 5
+
+// PC BOX 머리줄의 경험치 막대
+export function xpBar(xp: number): string {
+  const filled = Math.min(BAR, Math.floor((xp / XP_PER_EVOLUTION_MS) * BAR))
+  return '▓'.repeat(filled) + '░'.repeat(BAR - filled)
+}
+
+// 진화까지 남은 일한 시간. 분은 올림한다
+export function xpLeft(xp: number): string {
+  const minutes = Math.max(0, Math.ceil((XP_PER_EVOLUTION_MS - xp) / 60_000))
+  const hours = Math.floor(minutes / 60)
+  return hours > 0 ? `${hours}h${minutes % 60}m` : `${minutes}m`
+}

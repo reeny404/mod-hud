@@ -16,20 +16,29 @@ export type Egg = NestEgg
 export type Stage = NestEgg['stage']
 
 // boxPage 는 0부터 센 박스 페이지. 넘치면 마지막 페이지로 당긴다
-export type NestInput = { eggs: Egg[]; daycare: HeldEgg[]; box: BoxEntry[]; boxPage: number }
+// lead 는 앞장선 박스 칸의 key, evolving 은 가장 최근 진화. 둘 다 없으면 박스 칸에 표시를 하지 않는다
+export type NestInput = {
+  eggs: Egg[]
+  daycare: HeldEgg[]
+  box: BoxEntry[]
+  boxPage: number
+  lead?: string | null
+  evolving?: Pokedex['evolving']
+}
 
 // 불러온 스프라이트를 size 안에 들어가게 줄여 준다. 아직 없으면 undefined
 export type SpriteLookup = (species: number, size: number) => Pixels | undefined
 
 // 박스 아이콘 도트는 대부분 이보다 작아 줄이지 않고 그대로 그린다. 정수 배가 아니게 줄이면 도트가 뭉개져 더 줄이지 않는다
 export const HATCHED_SIZE = 24
-export const ICON_SIZE = 24
+// 박스 아이콘은 이 안에 들어가게 줄인다. 큰 포켓몬이 박스를 너무 차지하지 않게 한다
+export const ICON_SIZE = 18
+// 막 진화한 박스 칸이 진화 전과 뒤 그림을 번갈아 그리는 시간
+export const EVOLVE_MS = 4000
 // 부화한 뒤 높이 뛰며 반짝이는 시간
 export const CELEBRATE_MS = 90 * 1000
 // /clear 나 /resume 로 끝난 세션의 알을 이어 받을 세션이 나타나길 기다리는 시간
 export const HANDOFF_MS = 2 * 60 * 1000
-// 박스 한 페이지의 줄 수. 넘치면 페이지를 넘겨 본다
-const BOX_ROWS_MAX = 2
 // 키우미집에 남겨 두는 알 수. 넘치면 오래된 알부터 내보낸다
 const DAYCARE_MAX = 30
 // 이미 정리한 세션 id 를 남겨 두는 수
@@ -42,8 +51,9 @@ const EGG_SLOT = 20
 const EGG_ROWS = 8
 const HATCHED_SLOT = 24
 const HATCHED_ROWS = 14
-const TILE = 24
-const TILE_ROWS = TILE / 2
+// 박스 한 칸. 한 페이지는 한 줄이고 넘치면 페이지를 넘겨 본다
+export const TILE = 20
+export const TILE_ROWS = TILE / 2
 
 const UPPER_HALF = 0x2580
 const LOWER_HALF = 0x2584
@@ -77,6 +87,7 @@ const C = {
   daycareGround: 0x8cc860,
   daycareGroundAlt: 0x7cb850,
   boxBar: 0x3a6ea5,
+  leadStar: 0xffd23c,
   boxBarText: 0xffffff,
   boxCount: 0xffe080,
   wall: 0xd4f0dc,
@@ -528,7 +539,9 @@ export function eggsOf(sessions: readonly SessionStatus[], dex: Pokedex, now: nu
 export function speciesToLoad(input: NestInput, width: number): number[] {
   const eggs = eggsOnScreen(input, width).filter(egg => egg.stage !== 'egg' && egg.stage !== 'empty')
   const box = boxOnPage(input, width)
-  return [...new Set([...eggs.map(egg => egg.species), ...box.map(entry => entry.species)])]
+  // 막 진화한 칸이 이 페이지에 있으면 깜빡임에 쓸 진화 전 그림도 부른다
+  const before = input.evolving && box.some(entry => entry.key === input.evolving?.key) ? [input.evolving.from] : []
+  return [...new Set([...eggs.map(egg => egg.species), ...box.map(entry => entry.species), ...before])]
 }
 
 // 픽셀 그림판. 비운 픽셀은 터미널 배경이 비친다
@@ -708,24 +721,46 @@ function drawSlot(canvas: Canvas, slotX: number, slot: number, egg: Egg, frame: 
   sprite(canvas, eggX, eggTop, eggSprite(egg.key, egg.stage, angle), EGG_PALETTE)
 }
 
-// 박스는 많이 훑어보는 곳이라 아이콘을 움직이지 않는다
-function drawBox(canvas: Canvas, box: BoxEntry[], perRow: number, lookup: SpriteLookup) {
-  for (let y = 0; y < canvas.height; y++) {
-    for (let x = 0; x < canvas.width; x++) {
+// 앞장선 박스 칸 왼쪽 위에 다는 별
+export const LEAD_STAR = C.leadStar
+const STAR = ['.s.', 'sss', '.s.']
+
+// 박스 한 칸의 셀. 박스는 많이 훑어보는 곳이라 아이콘을 움직이지 않고, 막 진화한 칸만 잠깐 깜빡이며 반짝인다
+export function drawBoxTile(
+  entry: BoxEntry | null,
+  isLead: boolean,
+  evolving: Pokedex['evolving'],
+  frame: number,
+  now: number,
+  lookup: SpriteLookup,
+): Uint32Array {
+  const canvas = canvasOf(TILE, TILE)
+  for (let y = 0; y < TILE; y++) {
+    for (let x = 0; x < TILE; x++) {
       put(canvas, x, y, ((x >> 2) + (y >> 2)) % 2 === 0 ? C.wall : C.wallAlt)
     }
   }
-  const margin = Math.floor((canvas.width - perRow * TILE) / 2)
-  box.forEach((entry, i) => {
-    const tileX = margin + (i % perRow) * TILE
-    const bottom = Math.floor(i / perRow) * TILE + TILE - 2
-    const image = lookup(entry.species, ICON_SIZE)
+  if (entry) {
+    const isEvolving = evolving !== null && evolving.key === entry.key && now - evolving.at < EVOLVE_MS
+    // 원작처럼 진화 전과 뒤 그림을 두 프레임씩 번갈아 그린다
+    const species = isEvolving && Math.floor(frame / 2) % 2 === 0 ? evolving.from : entry.species
+    const image = lookup(species, ICON_SIZE)
+    const bottom = TILE - 2
     if (image) {
-      blit(canvas, tileX + Math.floor((TILE - image.width) / 2), bottom - image.height + 1, image)
+      blit(canvas, Math.floor((TILE - image.width) / 2), bottom - image.height + 1, image)
     } else {
-      sprite(canvas, tileX + Math.floor((TILE - 8) / 2), bottom - 7, BALL, BALL_PALETTE)
+      sprite(canvas, Math.floor((TILE - 8) / 2), bottom - 7, BALL, BALL_PALETTE)
     }
-  })
+    if (isEvolving) {
+      drawSparkles(canvas, 0, 0, TILE, TILE, frame)
+    }
+    if (isLead) {
+      sprite(canvas, 0, 0, STAR, { s: C.leadStar })
+    }
+  }
+  const out: number[] = []
+  pixelCells(canvas, out)
+  return Uint32Array.from(out)
 }
 
 // 위아래 두 픽셀을 반 블록 한 칸에 담는다. 둘 다 비면 빈칸으로 둔다
@@ -797,19 +832,11 @@ export function eggsOnScreen(input: NestInput, width: number): Egg[] {
   return eggLayout(input.eggs, width).flatMap(row => row.eggs)
 }
 
-function boxPerRow(width: number): number {
+export function boxPerRow(width: number): number {
   return Math.max(1, Math.floor(width / TILE))
 }
 
 export function boxPages(input: NestInput, width: number): number {
-  return Math.max(1, Math.ceil(input.box.length / (BOX_ROWS_MAX * boxPerRow(width))))
-}
-
-// 페이지가 여럿이면 마지막 페이지가 덜 차도 높이가 바뀌지 않게 늘 꽉 찬 줄 수로 그린다
-function boxRows(input: NestInput, width: number): number {
-  if (boxPages(input, width) > 1) {
-    return BOX_ROWS_MAX
-  }
   return Math.max(1, Math.ceil(input.box.length / boxPerRow(width)))
 }
 
@@ -817,10 +844,16 @@ export function boxPageOf(input: NestInput, width: number): number {
   return Math.min(Math.max(0, input.boxPage), boxPages(input, width) - 1)
 }
 
-function boxOnPage(input: NestInput, width: number): BoxEntry[] {
-  const size = BOX_ROWS_MAX * boxPerRow(width)
+export function boxOnPage(input: NestInput, width: number): BoxEntry[] {
+  const size = boxPerRow(width)
   const page = boxPageOf(input, width)
   return input.box.slice(page * size, (page + 1) * size)
+}
+
+// 박스 칸 key 가 있는 페이지. 막 진화한 칸으로 페이지를 넘길 때 쓴다
+export function boxPageOfKey(input: NestInput, width: number, key: string): number {
+  const index = input.box.findIndex(entry => entry.key === key)
+  return index < 0 ? boxPageOf(input, width) : Math.floor(index / boxPerRow(width))
 }
 
 // 키우미집은 머리글 한 줄과 작은 알 한 줄. 알이 없어도 그린다
@@ -841,13 +874,13 @@ function drawDaycare(canvas: Canvas, eggs: HeldEgg[], frame: number) {
   })
 }
 
-// 알 줄, 키우미집, 박스를 그린다. 세션이 없으면 알 줄은 빼고, 키우미집은 알이 없어도 그리고, 박스는 비어도 한 줄을 보인다
+// 알 줄과 키우미집을 그린다. 세션이 없으면 알 줄은 빼고, 키우미집은 알이 없어도 그린다. PC BOX 는 칸마다 따로 그린다(drawBoxTile)
 export function nestRows(input: NestInput, width: number): number {
   // 알 한 줄은 그림과 라벨 한 줄이고, 알이 있으면 그 아래 한 줄을 띄운다
   const layout = eggLayout(input.eggs, width)
   const eggs = layout.reduce((sum, row) => sum + row.rows + 1, 0) + (layout.length > 0 ? 1 : 0)
   const daycare = DAYCARE_ROWS + 1
-  return eggs + daycare + 1 + boxRows(input, width) * TILE_ROWS
+  return eggs + daycare
 }
 
 export function drawNest(input: NestInput, width: number, frame: number, now: number, lookup: SpriteLookup): Uint32Array {
@@ -890,20 +923,5 @@ export function drawNest(input: NestInput, width: number, frame: number, now: nu
   pixelCells(ground, out)
   textCells(width, [], CLEAR, out)
 
-  const count = `${input.box.length}`
-  const pages = boxPages(input, width)
-  const title = pages > 1 ? `PC BOX  ${boxPageOf(input, width) + 1}/${pages}` : 'PC BOX'
-  textCells(
-    width,
-    [
-      { at: 1, text: title, color: C.boxBarText },
-      { at: width - count.length - 1, text: count, color: C.boxCount },
-    ],
-    C.boxBar,
-    out,
-  )
-  const box = canvasOf(width, boxRows(input, width) * TILE)
-  drawBox(box, boxOnPage(input, width), boxPerRow(width), lookup)
-  pixelCells(box, out)
   return Uint32Array.from(out)
 }

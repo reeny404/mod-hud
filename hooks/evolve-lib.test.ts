@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { BoxEntry, Pokedex, SessionStatus } from '../types'
-import { advanceEvolution, autoLead, evolutionOf, XP_GAP_MS, XP_PER_EVOLUTION_MS } from './evolve-lib'
+import { advanceEvolution, autoLead, evolutionOf, XP_GAP_MS, XP_PER_EVOLUTION_MS, xpBar, xpLeft } from './evolve-lib'
 import { emptyPokedex, parsePokedex } from './nest-lib'
 
 const ROOT = '/p/momochi'
@@ -149,4 +149,13 @@ test('예전 기록을 읽으면 도감은 박스로 채우고 박스에 있는 
   expect(dex.legends).toContain(150)
   expect(legends).toEqual([])
   expect(dex.box.filter(one => one.species === 150).length).toBe(1)
+})
+
+test('경험치 막대는 다섯 칸이고 남은 시간을 짧게 쓴다', () => {
+  expect(xpBar(0)).toBe('░░░░░')
+  expect(xpBar(XP_PER_EVOLUTION_MS * 0.4)).toBe('▓▓░░░')
+  expect(xpBar(XP_PER_EVOLUTION_MS)).toBe('▓▓▓▓▓')
+  expect(xpLeft(XP_PER_EVOLUTION_MS - 70 * 60_000)).toBe('1h10m')
+  expect(xpLeft(XP_PER_EVOLUTION_MS - 25 * 60_000 - 30_000)).toBe('26m')
+  expect(xpLeft(XP_PER_EVOLUTION_MS + 5)).toBe('0m')
 })

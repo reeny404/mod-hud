@@ -5,6 +5,7 @@ import type {
   Attention,
   BackgroundTask,
   BoardEntry,
+  BoxEntry,
   InboxCache,
   InboxItem,
   IssuesCache,
@@ -43,19 +44,27 @@ import {
   parseWorktrees,
   readEnvValue,
 } from './issues-lib'
-import { advanceEvolution } from './evolve-lib'
+import { advanceEvolution, xpBar, xpLeft } from './evolve-lib'
+import { canEvolve } from './dex-data'
 import {
   advancePokedex,
+  boxOnPage,
   boxPageOf,
+  boxPageOfKey,
   boxPages,
+  boxPerRow,
+  drawBoxTile,
   drawNest,
   eggsOf,
+  EVOLVE_MS,
   eggsOnScreen,
   emptyPokedex,
   keeperOf,
   nestRows,
   parsePokedex,
   speciesToLoad,
+  TILE,
+  TILE_ROWS,
   updatePending,
 } from './nest-lib'
 import type { NestInput, SpriteLookup } from './nest-lib'
@@ -818,6 +827,10 @@ async function pokemonName($: EngineInterface, home: string, species: number): P
 let nestScene: { columns: number; rows: number; input: NestInput } | null = null
 // 보고 있는 박스 페이지. 0부터 센다
 let boxPage = 0
+// 페이지를 넘겨 준 마지막 진화 시각. 같은 진화로는 한 번만 넘긴다
+let evolvingSeen = 0
+// PC BOX 머리줄. 한국어 대신 영어 이름이지만 ★ 와 막대는 Raster 가 못 그려 Text 로 그린다
+let boxHeader: { count: number; lead: string | null; canLead: boolean } = { count: 0, lead: null, canLead: false }
 let nestFrame = 0
 // 그림이 보일 때만 돈다. 패널이 닫히거나 입력창 위로 옮겨 칠할 곳이 없으면 멈춘다
 let nestTimer: ReturnType<EngineInterface['clock']['every']> | null = null
@@ -825,12 +838,39 @@ let nestTimer: ReturnType<EngineInterface['clock']['every']> | null = null
 let nestDenied = 0
 const NEST_DENY_LIMIT = 8
 
-function nestCells(scene: { columns: number; input: NestInput }, now: number): string {
+function base64Of(cells: Uint32Array): string {
   // 엔진의 Uint8Array 는 toBase64 를 갖지만 TypeScript 의 lib 에는 아직 없다
-  const bytes = new Uint8Array(drawNest(scene.input, scene.columns, nestFrame, now, lookupSprite).buffer) as Uint8Array & {
-    toBase64(): string
-  }
+  const bytes = new Uint8Array(cells.buffer) as Uint8Array & { toBase64(): string }
   return bytes.toBase64()
+}
+
+function nestCells(scene: { columns: number; input: NestInput }, now: number): string {
+  return base64Of(drawNest(scene.input, scene.columns, nestFrame, now, lookupSprite))
+}
+
+// 이번 박스 페이지의 칸. 한 줄을 늘 꽉 채워 그리고, 포켓몬이 없는 칸은 null 이다
+function boxTiles(scene: { columns: number; input: NestInput }) {
+  const page = boxOnPage(scene.input, scene.columns)
+  return Array.from({ length: boxPerRow(scene.columns) }, (_, i) => page[i] ?? null)
+}
+
+function tileCells(scene: { columns: number; input: NestInput }, entry: BoxEntry | null, now: number): string {
+  const { lead = null, evolving = null } = scene.input
+  return base64Of(drawBoxTile(entry, entry !== null && entry.key === lead, evolving, nestFrame, now, lookupSprite))
+}
+
+// 진화할 수 있는 박스 포켓몬을 박스 순서대로 앞뒤로 골라 앞장세운다
+function turnLead($: EngineInterface, delta: number) {
+  if (!nestScene) {
+    return
+  }
+  const able = nestScene.input.box.filter(entry => canEvolve(entry.species))
+  if (able.length === 0) {
+    return
+  }
+  const at = able.findIndex(entry => entry.key === nestScene?.input.lead)
+  const next = able[(at < 0 ? 0 : at + delta + able.length) % able.length]!
+  void pickLead($, next.key)
 }
 
 function startNest($: EngineInterface) {
@@ -860,7 +900,17 @@ async function tickNest($: EngineInterface) {
     return
   }
   nestFrame += 1
-  const painted = await $.ui.blit({ requestId: PANE, key: 'nest', cells: nestCells(nestScene, await $.clock.now()) })
+  const now = await $.clock.now()
+  const painted = await $.ui.blit({ requestId: PANE, key: 'nest', cells: nestCells(nestScene, now) })
+  // 막 진화한 박스 칸만 깜빡이므로 그 칸만 다시 칠한다
+  const evolving = nestScene.input.evolving
+  if (evolving && now - evolving.at < EVOLVE_MS) {
+    const tiles = boxTiles(nestScene)
+    const at = tiles.findIndex(entry => entry?.key === evolving.key)
+    if (at >= 0) {
+      await $.ui.blit({ requestId: PANE, key: `tile-${at}`, cells: tileCells(nestScene, tiles[at]!, now) })
+    }
+  }
   nestDenied = painted.deny ? nestDenied + 1 : 0
   if (nestDenied >= NEST_DENY_LIMIT) {
     stopNest()
@@ -1266,8 +1316,21 @@ export const register: Register = (on, options) => {
     const hasNest = Raster !== null && e.props.placement === 'dock' && e.props.bodyColumns >= 20
     if (hasNest) {
       const dex = await read($, pokedex)
-      const input = { eggs: await read($, eggs), daycare: dex.daycare, box: dex.box, boxPage }
-      nestScene = { columns: e.props.bodyColumns, rows: nestRows(input, e.props.bodyColumns), input }
+      // 새 진화를 처음 보면 그 칸이 있는 페이지로 넘긴다
+      const columns = e.props.bodyColumns
+      const home = (await $.env.get('HOME')) ?? ''
+      if (dex.evolving && dex.evolving.at !== evolvingSeen && now - dex.evolving.at < EVOLVE_MS) {
+        evolvingSeen = dex.evolving.at
+        boxPage = boxPageOfKey({ eggs: [], daycare: [], box: dex.box, boxPage }, columns, dex.evolving.key)
+      }
+      const input = { eggs: await read($, eggs), daycare: dex.daycare, box: dex.box, boxPage, lead: dex.lead, evolving: dex.evolving }
+      nestScene = { columns, rows: nestRows(input, columns), input }
+      const lead = dex.box.find(entry => entry.key === dex.lead)
+      boxHeader = {
+        count: dex.box.length,
+        lead: lead ? `★ ${await pokemonName($, home, lead.species)} ${xpBar(dex.xp)} ${xpLeft(dex.xp)}` : null,
+        canLead: dex.box.some(entry => canEvolve(entry.species)),
+      }
       for (const species of speciesToLoad(input, e.props.bodyColumns)) {
         void loadSprite($, species)
       }
@@ -1482,15 +1545,33 @@ export const register: Register = (on, options) => {
                 <Button key={`send-${egg.key}`} label={`Send to PC BOX · ${egg.label}`} onPress={() => sendToBox($, egg.key)} />
               ))}
             <Raster key="nest" columns={nestScene.columns} rows={nestScene.rows} cells={nestCells(nestScene, now)} />
-            {boxPages(nestScene.input, nestScene.columns) > 1 && (
+            <Box backgroundColor="#3a6ea5" width={nestScene.columns} paddingX={1}>
+              <Text bold color="#ffffff" wrap="truncate-end">
+                PC BOX
+                {boxPages(nestScene.input, nestScene.columns) > 1 &&
+                  `  ${boxPageOf(nestScene.input, nestScene.columns) + 1}/${boxPages(nestScene.input, nestScene.columns)}`}
+                {boxHeader.lead && <Text color="#ffe080">{`  ${boxHeader.lead}`}</Text>}
+              </Text>
+              <Box flexGrow={1} />
+              <Text bold color="#ffe080">
+                {boxHeader.count}
+              </Text>
+            </Box>
+            <Box justifyContent="center">
+              {boxTiles(nestScene).map((entry, i) => (
+                <Box key={`tile-${i}`}>
+                  <Raster key={`tile-${i}`} columns={TILE} rows={TILE_ROWS} cells={tileCells(nestScene!, entry, now)} />
+                </Box>
+              ))}
+            </Box>
+            {(boxPages(nestScene.input, nestScene.columns) > 1 || boxHeader.canLead) && (
               <Box justifyContent="center">
-                <Button key="box-prev" label="◀ Prev" onPress={() => turnBox($, -1)} />
-                <Text dimColor>
-                  {'  '}
-                  {boxPageOf(nestScene.input, nestScene.columns) + 1} / {boxPages(nestScene.input, nestScene.columns)}
-                  {'  '}
-                </Text>
-                <Button key="box-next" label="Next ▶" onPress={() => turnBox($, 1)} />
+                {boxPages(nestScene.input, nestScene.columns) > 1 && (
+                  <Button key="box-prev" label="◀ Prev" onPress={() => turnBox($, -1)} />
+                )}
+                {boxPages(nestScene.input, nestScene.columns) > 1 && <Button key="box-next" label="Next ▶" onPress={() => turnBox($, 1)} />}
+                {boxHeader.canLead && <Button key="lead-prev" label="◀ Lead" onPress={() => turnLead($, -1)} />}
+                {boxHeader.canLead && <Button key="lead-next" label="Lead ▶" onPress={() => turnLead($, 1)} />}
               </Box>
             )}
           </Box>
