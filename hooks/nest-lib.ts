@@ -916,13 +916,44 @@ export function nestRows(input: NestInput, width: number): number {
   return layout.reduce((sum, row) => sum + row.rows + 1, 0) + (layout.length > 0 ? 1 : 0)
 }
 
+// 앞장선 포켓몬이 풀밭을 걸으면 풀밭이 이만큼 높아진다
+const WALK_GROUND_ROWS = 6
+// 풀밭을 걷는 포켓몬의 크기. 풀밭 높이에 맞춰 박스 아이콘보다 작다
+export const WALKER_SIZE = 11
+// 걷는 포켓몬이 통통 튀는 높이. 두 프레임마다 한 칸 뛴다
+const STEP_HOP = [0, 1, 1, 0]
+
+export function daycareGroundRows(hasWalker: boolean): number {
+  return hasWalker ? WALK_GROUND_ROWS : DAYCARE_GROUND_ROWS
+}
+
 // 키우미집 풀밭과 맡긴 작은 알. 알이 없어도 그린다
-export function drawDaycareGround(daycare: HeldEgg[], width: number, frame: number): Uint32Array {
-  const ground = canvasOf(width, DAYCARE_GROUND_ROWS * 2)
+// walker 는 앞장선 포켓몬 그림. 주면 풀밭을 높여 그 포켓몬이 좌우로 걷게 한다. null 이면 풀밭만 높이고 아무도 걷지 않는다
+export function drawDaycareGround(daycare: HeldEgg[], width: number, frame: number, walker?: Pixels | null): Uint32Array {
+  const ground = canvasOf(width, daycareGroundRows(walker !== undefined) * 2)
   drawDaycare(ground, daycare, frame)
+  if (walker) {
+    // 오른쪽 끝에서 왼쪽으로 한 칸씩 걷다가 끝에 닿으면 돌아온다. 아이콘은 왼쪽을 보므로 오른쪽으로 갈 때 뒤집는다
+    const range = Math.max(1, width - walker.width)
+    const step = frame % (range * 2)
+    const isGoingRight = step >= range
+    const x = isGoingRight ? step - range : range - step
+    const bottom = ground.height - 1 - (STEP_HOP[frame % STEP_HOP.length] ?? 0)
+    const image = isGoingRight ? mirrored(walker) : walker
+    blit(ground, x, bottom - image.height + 1, image)
+  }
   const out: number[] = []
   pixelCells(ground, out)
   return Uint32Array.from(out)
+}
+
+function mirrored(image: Pixels): Pixels {
+  const px = image.px.map((_, i) => {
+    const x = i % image.width
+    const y = Math.floor(i / image.width)
+    return image.px[y * image.width + (image.width - 1 - x)]!
+  })
+  return { ...image, px }
 }
 
 export function drawNest(input: NestInput, width: number, frame: number, now: number, lookup: SpriteLookup): Uint32Array {

@@ -12,6 +12,7 @@ import {
   DAILY_EGGS,
   DAYCARE_GROUND_ROWS,
   drawBoxTile,
+  daycareGroundRows,
   drawDaycareGround,
   drawPortrait,
   drawNest,
@@ -622,4 +623,41 @@ test('카드에 그리는 원본 그림은 빈 칸을 배경색으로 칠해 아
     expect(cells[i + 2]).not.toBe(CLEAR)
   }
   expect(cells.includes(0x202020)).toBe(true)
+})
+
+test('앞장선 포켓몬은 키우미집 풀밭을 통통 튀며 좌우로 걷고 가는 쪽을 본다', () => {
+  // 왼쪽 반은 A, 오른쪽 반은 B 인 그림. 아이콘은 왼쪽을 보므로 오른쪽으로 걸을 때는 뒤집는다
+  const A = 0x111111
+  const B = 0x222222
+  const walker = { width: 2, height: 2, px: [A, B, A, B] }
+  const width = 20
+  expect(daycareGroundRows(false)).toBe(DAYCARE_GROUND_ROWS)
+  expect(daycareGroundRows(true)).toBeGreaterThan(DAYCARE_GROUND_ROWS)
+  const columnsOf = (cells: Uint32Array, color: number) => {
+    const xs: number[] = []
+    for (let i = 0; i < cells.length; i += 3) {
+      if (cells[i + 1] === color || cells[i + 2] === color) {
+        xs.push((i / 3) % width)
+      }
+    }
+    return xs
+  }
+  const frames = Array.from({ length: 40 }, (_, frame) => drawDaycareGround([], width, frame, walker))
+  expect(frames[0]!.length).toBe(width * daycareGroundRows(true) * 3)
+  // 걸어서 자리가 바뀐다
+  expect(new Set(frames.map(cells => Math.min(...columnsOf(cells, A)))).size).toBeGreaterThan(5)
+  // 처음에는 왼쪽으로 걸어 A 가 왼쪽에, 끝에 닿아 돌아오면 뒤집혀 B 가 왼쪽에 있다
+  const facing = frames.map(cells => Math.min(...columnsOf(cells, A)) < Math.min(...columnsOf(cells, B)))
+  expect(facing.includes(true)).toBe(true)
+  expect(facing.includes(false)).toBe(true)
+  // 통통 튄다: 같은 자리가 아니어도 높이가 프레임마다 바뀐다
+  const rowsOf = (cells: Uint32Array) => {
+    for (let i = 0; i < cells.length; i += 3) {
+      if (cells[i + 1] === A || cells[i + 2] === A) {
+        return Math.floor(i / 3 / width) * 2 + (cells[i + 1] === A ? 0 : 1)
+      }
+    }
+    return -1
+  }
+  expect(new Set(frames.slice(0, 4).map(rowsOf)).size).toBeGreaterThan(1)
 })

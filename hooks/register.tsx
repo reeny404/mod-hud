@@ -52,7 +52,7 @@ import {
   boxPageOfKey,
   boxPages,
   boxPerRow,
-  DAYCARE_GROUND_ROWS,
+  daycareGroundRows,
   drawBoxTile,
   drawDaycareGround,
   drawNest,
@@ -69,6 +69,7 @@ import {
   TILE,
   TILE_ROWS,
   updatePending,
+  WALKER_SIZE,
 } from './nest-lib'
 import type { NestInput, SpriteLookup } from './nest-lib'
 import { crop, decodePng, fit } from './png-lib'
@@ -912,8 +913,16 @@ function nestCells(scene: { columns: number; input: NestInput }, now: number): s
   return base64Of(drawNest(scene.input, scene.columns, nestFrame, now, lookupSprite))
 }
 
+// 앞장선 포켓몬. 키우미집 풀밭을 걸어다닌다
+function walkerOf(scene: { input: NestInput }): BoxEntry | undefined {
+  return scene.input.box.find(entry => entry.key === scene.input.lead)
+}
+
 function daycareCells(scene: { columns: number; input: NestInput }): string {
-  return base64Of(drawDaycareGround(scene.input.daycare, scene.columns, nestFrame))
+  const lead = walkerOf(scene)
+  // 앞장이 있으면 그림을 아직 못 불러왔어도 풀밭 높이는 미리 맞춘다
+  const walker = lead ? (lookupSprite(lead.species, WALKER_SIZE) ?? null) : undefined
+  return base64Of(drawDaycareGround(scene.input.daycare, scene.columns, nestFrame, walker))
 }
 
 // 이번 박스 페이지의 칸. 한 줄을 늘 꽉 채워 그리고, 포켓몬이 없는 칸은 null 이다
@@ -1409,7 +1418,8 @@ export const register: Register = (on, options) => {
           canLead: next !== null && entry.key !== dex.lead,
         })
       }
-      for (const species of speciesToLoad(input, e.props.bodyColumns)) {
+      const walking = dex.box.find(entry => entry.key === dex.lead)
+      for (const species of [...speciesToLoad(input, e.props.bodyColumns), ...(walking ? [walking.species] : [])]) {
         void loadSprite($, species)
       }
       startNest($)
@@ -1645,7 +1655,12 @@ export const register: Register = (on, options) => {
               </Text>
             </Box>
             {!daycareCollapsed && (
-              <Raster key="daycare" columns={nestScene.columns} rows={DAYCARE_GROUND_ROWS} cells={daycareCells(nestScene)} />
+              <Raster
+                key="daycare"
+                columns={nestScene.columns}
+                rows={daycareGroundRows(walkerOf(nestScene) !== undefined)}
+                cells={daycareCells(nestScene)}
+              />
             )}
             <Box backgroundColor="#3a6ea5" width={nestScene.columns} paddingX={1} marginTop={1}>
               {/* 머리줄을 누르면 박스를 접거나 편다 */}
