@@ -887,7 +887,9 @@ export function boxOnPage(input: NestInput, width: number): BoxEntry[] {
 export const ARRIVAL_FRAMES = 36
 export const ARRIVAL_ROWS = 13
 const ARRIVAL_HEIGHT = (ARRIVAL_ROWS - 1) * 2
-const ARRIVAL_SIZE = 24
+// 전설 그림 크기. 아래 글 줄에 닿지 않게 그림 칸보다 작게 그리고 한 줄을 띄운다
+const ARRIVAL_SIZE = 20
+const ARRIVAL_FLOOR = ARRIVAL_HEIGHT - 2
 const ARRIVAL_PAPER = 0xf8f8f0
 const ARRIVAL_INK = 0x202020
 
@@ -901,9 +903,9 @@ export function drawArrival(species: number, name: string, width: number, step: 
   const ballY = ARRIVAL_HEIGHT - 10
   const legend = (x: number) => {
     if (image) {
-      blit(canvas, x, ARRIVAL_HEIGHT - image.height, image)
+      blit(canvas, x, ARRIVAL_FLOOR - image.height, image)
     } else {
-      sprite(canvas, x, ARRIVAL_HEIGHT - 8, BALL, BALL_PALETTE)
+      sprite(canvas, x, ARRIVAL_FLOOR - 8, BALL, BALL_PALETTE)
     }
   }
   let caption = ''

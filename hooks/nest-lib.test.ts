@@ -711,3 +711,16 @@ test('전설 등장 장면은 줄무늬로 덮이고 전설이 나타난 뒤 몬
   // 몬스터볼이 흔들린다
   expect(at(22)).not.toEqual(at(23))
 })
+
+test('전설 등장 장면의 그림은 아래 글 줄에 닿지 않게 한 줄을 띄운다', () => {
+  // 장면 크기에 꽉 차는 큰 그림을 줘도 마지막 그림 줄(글 바로 위)은 비어 있다
+  const huge: SpriteLookup = (_, size) => ({ width: size, height: size, px: Array.from({ length: size * size }, () => 0x123456) })
+  const width = 50
+  const cells = drawArrival(146, 'Moltres', width, 12, huge)
+  const lastPictureRow = ARRIVAL_ROWS - 2
+  for (let x = 0; x < width; x++) {
+    const i = (lastPictureRow * width + x) * 3
+    expect(cells[i + 1]).not.toBe(0x123456)
+    expect(cells[i + 2]).not.toBe(0x123456)
+  }
+})
