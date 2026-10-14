@@ -167,6 +167,19 @@ export type Pokedex = {
   done: string[]
   // 세션 id 와 머지돼도 알이 깨지지 않을 브랜치. 박스로 보낸 브랜치나 알을 받을 때 이미 머지된 브랜치다
   sent: Record<string, string | null>
+  // 앞장선 포켓몬이 먹은 경험치(일한 시간 ms). 막대는 하나라 앞장이 바뀌어도 남는다
+  xp: number
+  // 경험치를 마지막으로 더한 시각. 0 이면 아직 안 더했다
+  xpAt: number
+  // 앞장선 박스 포켓몬의 key. chosen 이면 사용자가 고른 것
+  lead: string | null
+  chosen: boolean
+  // 지금까지 박스에 들어온 종. 진화해서 사라진 종도 남는다
+  seen: number[]
+  // 이미 받은 전설
+  legends: number[]
+  // 가장 최근 진화. 모든 세션의 패널이 깜빡임을 그리는 데 쓴다
+  evolving: { key: string; from: number; at: number } | null
 }
 
 // 패널에 그릴 알 하나

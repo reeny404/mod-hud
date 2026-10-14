@@ -169,13 +169,35 @@ export function freshEggs(day: string): HeldEgg[] {
   })
 }
 
-export const emptyPokedex = (): Pokedex => ({ day: '', hatched: {}, pending: [], daycare: [], box: [], holds: {}, done: [], sent: {} })
+export const emptyPokedex = (): Pokedex => ({
+  day: '',
+  hatched: {},
+  pending: [],
+  daycare: [],
+  box: [],
+  holds: {},
+  done: [],
+  sent: {},
+  xp: 0,
+  xpAt: 0,
+  lead: null,
+  chosen: false,
+  seen: [],
+  legends: [],
+  evolving: null,
+})
 
 export function parsePokedex(text: string): Pokedex {
   try {
     const parsed = JSON.parse(text) as Partial<Pokedex>
     const eggs = <T extends { species?: unknown }>(list: unknown): T[] =>
       Array.isArray(list) ? (list as T[]).filter(entry => typeof entry?.species === 'number') : []
+    const number = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
+    const numbers = (value: unknown): number[] => (Array.isArray(value) ? value.filter(n => typeof n === 'number') : [])
+    const isEvolving = (value: unknown): value is Pokedex['evolving'] => {
+      const one = value as { key?: unknown; from?: unknown; at?: unknown } | null
+      return typeof one?.key === 'string' && typeof one.from === 'number' && typeof one.at === 'number'
+    }
     const record = <T>(value: unknown): Record<string, T> => (value && typeof value === 'object' ? (value as Record<string, T>) : {})
     // 옛 기록의 sent 는 { count, branch } 라 버린다
     const sent = Object.entries(record<unknown>(Array.isArray(parsed.sent) ? {} : parsed.sent)).filter(
@@ -190,6 +212,13 @@ export function parsePokedex(text: string): Pokedex {
       holds: record(parsed.holds),
       done: Array.isArray(parsed.done) ? parsed.done : [],
       sent: Object.fromEntries(sent),
+      xp: number(parsed.xp),
+      xpAt: number(parsed.xpAt),
+      lead: typeof parsed.lead === 'string' ? parsed.lead : null,
+      chosen: parsed.chosen === true,
+      seen: numbers(parsed.seen),
+      legends: numbers(parsed.legends),
+      evolving: isEvolving(parsed.evolving) ? parsed.evolving : null,
     }
   } catch {
     return emptyPokedex()
@@ -425,7 +454,9 @@ export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[],
   const nextHolds = ofKnown(holds)
   // 들거나 맡기거나 기다리는 알이 아닌 알의 부화 기록은 지운다
   const kept = new Set([...Object.values(nextHolds), ...nextDaycare, ...pending].map(egg => egg.key))
+  // 진화 기록은 advanceEvolution 이 맞추므로 그대로 넘긴다
   const next: Pokedex = {
+    ...dex,
     day: today,
     hatched: Object.fromEntries(Object.entries(hatched).filter(([key]) => kept.has(key))),
     pending,
