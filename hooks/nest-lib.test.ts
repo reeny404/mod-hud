@@ -469,14 +469,15 @@ test('스프라이트를 불러오면 몬스터볼 대신 그 그림을 그린�
   expect(Array.from(withDot).includes(0x123456)).toBe(true)
 })
 
-test('박스 칸은 18점 아이콘을 그리고 앞장이면 별을 단다', () => {
+test('박스 칸은 14점 아이콘을 그리고 앞장이면 별을 단다', () => {
   const sizes: number[] = []
   const big: SpriteLookup = (_, size) => {
     sizes.push(size)
     return { width: 1, height: 1, px: [0x123456] }
   }
   const plain = drawBoxTile(dexEgg('k'), false, null, 0, NOW, big)
-  expect(sizes).toEqual([18])
+  expect(sizes).toEqual([14])
+  expect(TILE).toBe(16)
   expect(plain.length).toBe(TILE * (TILE / 2) * 3)
   const lead = drawBoxTile(dexEgg('k'), true, null, 0, NOW, big)
   expect(Array.from(plain).includes(LEAD_STAR)).toBe(false)

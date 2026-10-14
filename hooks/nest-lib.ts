@@ -32,7 +32,7 @@ export type SpriteLookup = (species: number, size: number) => Pixels | undefined
 // 박스 아이콘 도트는 대부분 이보다 작아 줄이지 않고 그대로 그린다. 정수 배가 아니게 줄이면 도트가 뭉개져 더 줄이지 않는다
 export const HATCHED_SIZE = 24
 // 박스 아이콘은 이 안에 들어가게 줄인다. 큰 포켓몬이 박스를 너무 차지하지 않게 한다
-export const ICON_SIZE = 18
+export const ICON_SIZE = 14
 // 막 진화한 박스 칸이 진화 전과 뒤 그림을 번갈아 그리는 시간
 export const EVOLVE_MS = 4000
 // 부화한 뒤 높이 뛰며 반짝이는 시간
@@ -52,7 +52,7 @@ const EGG_ROWS = 8
 const HATCHED_SLOT = 24
 const HATCHED_ROWS = 14
 // 박스 한 칸. 한 페이지는 한 줄이고 넘치면 페이지를 넘겨 본다
-export const TILE = 20
+export const TILE = 16
 export const TILE_ROWS = TILE / 2
 
 const UPPER_HALF = 0x2580

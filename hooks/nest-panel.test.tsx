@@ -77,8 +77,8 @@ test('옆에 붙은 패널은 PC BOX 머리줄에 앞장선 포켓몬과 경험�
   expect(centered.some(box => nodes(box, 'Button', { key: 'lead-c' }).length === 1)).toBe(true)
   expect(nodes(tree, 'Button', { key: 'lead-a' }).length).toBe(0)
   expect(nodes(tree, 'Button', { key: 'lead-b' }).length).toBe(0)
-  // 카드는 패널 안에 들어가게 놓는다. 폭 60, 칸 20 이면 칸은 0, 20, 40 에 있고 카드 폭은 42 다
-  expect(nodes(tree, 'Box', { backgroundColor: '#202020' }).map(card => card.props?.left)).toEqual([0, -11, -22])
+  // 카드는 패널 안에 들어가게 놓는다. 폭 60, 칸 16 이면 세 칸이 가운데 정렬돼 6, 22, 38 에 있고 카드 폭은 42 다
+  expect(nodes(tree, 'Box', { backgroundColor: '#202020' }).map(card => card.props?.left)).toEqual([-6, -13, -20])
   // 카드는 아래 화면이 비치지 않게 배경을 칠하고 가운데 정렬한다
   expect(nodes(tree, 'Box', { backgroundColor: '#202020', alignItems: 'center' }).length).toBe(3)
   // DAY CARE 머리줄을 누르면 풀밭을 접고 남은 알 수만 남긴다. 다시 누르면 편다
