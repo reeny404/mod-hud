@@ -102,17 +102,17 @@ export const cleanupBlocker = (row: Row, sessions: readonly TreeSession[], ownCw
   }
   const here = sessions.filter(session => isLive(session, now) && findTreeFor([row], session.cwd))
   if (here.some(session => !isIdle(session, now))) {
-    return '세션이 열려 있다'
+    return 'a session is open here'
   }
   // 이 세션의 상태 파일이 없어 위에서 못 걸렀을 때
   if (here.length === 0 && findTreeFor([row], ownCwd)) {
-    return '이 세션이 여기서 돌고 있다'
+    return 'this session runs here'
   }
   if (row.dirty > 0) {
-    return `커밋 안 한 변경 ${row.dirty}개`
+    return `${row.dirty} uncommitted changes`
   }
   if (row.head !== row.mr.sha) {
-    return 'MR 에 없는 커밋이 있다'
+    return 'has commits not in the MR'
   }
   return null
 }
@@ -154,13 +154,13 @@ export const findCheck = (command: string): string | null => {
 export const formatAgo = (ms: number): string => {
   const minutes = Math.floor(ms / 60_000)
   if (minutes < 1) {
-    return '방금'
+    return 'just now'
   }
   if (minutes < 60) {
-    return `${minutes}분 전`
+    return `${minutes}m ago`
   }
   const hours = Math.floor(minutes / 60)
-  return hours < 24 ? `${hours}시간 전` : `${Math.floor(hours / 24)}일 전`
+  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`
 }
 
 // .env.local 에서 GITLAB_TOKEN 값만 꺼낸다

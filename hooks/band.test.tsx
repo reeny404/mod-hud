@@ -62,21 +62,21 @@ test('입력창 위 한 줄과 패널이 상태 파일을 읽어 각 화면에�
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'mod-hud', surface, component: 'AbovePrompt', props: { hasSurvey: false } as never })
     expect(await ui.drawn()).toMatchObject({ type: 'Box' })
-    expect(await ui.find({ type: 'Text', text: /⚑ 내 차례 1/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /▶ 진행 1/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /⚑ Your turn 1/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /▶ Working 1/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /MR/ })).toBeUndefined()
     // 내 차례 세션은 입력창 위에 한 줄씩 풀어 보인다
-    expect(await ui.find({ type: 'Text', text: /\? 질문/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /\? question/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /› 컬럼 이름을 바꿀까요\?/ })).toBeDefined()
     await ui.unmount()
 
     // 저장소 정보가 없는 세션에서는 Issues 가 없다
     const pane = await $.ui.mount({ plugin: 'mod-hud', surface, component: 'Pane', requestId: 'mod-hud', props: {} as never } as never)
-    expect(await pane.find({ type: 'Text', text: /⚑ 내 차례 1/ })).toBeDefined()
-    expect(await pane.find({ type: 'Text', text: /\? 질문/ })).toBeDefined()
-    expect(await pane.find({ type: 'Text', text: /12분째/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /⚑ Your turn 1/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /\? question/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /for 12m/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /컬럼 이름을 바꿀까요\?/ })).toBeDefined()
-    expect(await pane.find({ type: 'Text', text: /▶ 진행 중 1/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /▶ Working 1/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /마이그레이션 적용 중/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /Issues/ })).toBeUndefined()
     await pane.unmount()

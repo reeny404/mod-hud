@@ -100,7 +100,7 @@ test('처음에는 한 번 부르고 토스트 없이 쌓인 알림을 보이며
   expect(calls.linear).toBe(1)
   await clock.advance(3 * 60 * 1000)
   expect(calls.linear).toBe(2)
-  expect(calls.toasts).toEqual(['Linear ABC-700 멘션: 새 댓글'])
+  expect(calls.toasts).toEqual(['Linear ABC-700 mention: 새 댓글'])
 })
 
 test('다른 세션이 막 조회했거나 조회 중이면 Linear 를 부르지 않고 토스트도 하지 않는다', async ($, on) => {

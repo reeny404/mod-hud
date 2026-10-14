@@ -85,9 +85,9 @@ const ICON = { mine: '⚑', running: '▶', mr: '⇄', inbox: '@', issues: '⎇'
 const COLOR = { mine: 'red', running: 'yellow', mr: 'blue', inbox: 'magenta', issues: 'cyan' } as const
 
 const ATTENTION = {
-  permission: { mark: '!', label: '권한 승인', color: 'red' },
-  question: { mark: '?', label: '질문', color: 'yellow' },
-  answered: { mark: '✓', label: '확인 대기', color: 'green' },
+  permission: { mark: '!', label: 'permission', color: 'red' },
+  question: { mark: '?', label: 'question', color: 'yellow' },
+  answered: { mark: '✓', label: 'done', color: 'green' },
 } as const
 const HEARTBEAT_MS = 60 * 1000
 // 알과 박스 그림을 다시 칠하는 간격. 패널 전체가 아니라 그림만 칠하므로 짧아도 된다
@@ -441,7 +441,7 @@ async function fetchLinear($: EngineInterface, issue: string, now: number): Prom
 async function cleanup($: EngineInterface, root: string, row: Row): Promise<string | null> {
   const removed = await $.process.run(['git', 'worktree', 'remove', row.path], { cwd: root })
   if (removed.exitCode !== 0) {
-    row.note = `정리 실패: ${removed.stderr.trim().split('\n')[0] ?? ''}`
+    row.note = `cleanup failed: ${removed.stderr.trim().split('\n')[0] ?? ''}`
     return null
   }
   // head 가 MR 의 sha 와 같다는 걸 확인했으므로 squash 머지여도 -D 로 지운다
@@ -450,9 +450,9 @@ async function cleanup($: EngineInterface, root: string, row: Row): Promise<stri
   }
   const name = row.issue ? `#${row.issue}` : (row.branch ?? row.path)
   // 하루 넘게 대기하던 세션은 지운 폴더에 남으므로 닫으라고 알린다
-  const left = row.session ? ', 대기 세션은 닫을 것' : ''
-  $.ui.toast(`${name} MR 머지됨, worktree 정리${left}`)
-  return `${name}: worktree 와 브랜치를 지웠다${left}`
+  const left = row.session ? ', close its idle session' : ''
+  $.ui.toast(`${name} MR merged, worktree cleaned up${left}`)
+  return `${name}: removed worktree and branch${left}`
 }
 
 // git, GitLab, Linear 를 불러 worktree 목록을 새로 만든다. 조회를 맡은 세션만 부른다
@@ -493,7 +493,7 @@ async function collectIssues($: EngineInterface, { root, api, base }: RepoInfo, 
         continue
       }
       if (blocker !== null && blocker !== 'not-merged') {
-        row.note = `머지됨, 정리 보류: ${blocker}`
+        row.note = `merged, cleanup on hold: ${blocker}`
       }
     }
     next.push(row)
@@ -675,16 +675,16 @@ async function keepPokedex($: EngineInterface, sessions: SessionStatus[], now: n
       await $.process.run(['rm', '-f', `${home}/${SENDBOX_DIR}/${name}`])
     }
     for (const egg of advanced.born) {
-      $.ui.toast(`짜잔! ${egg.label} 알에서 ${await pokemonName($, home, egg.species)} 탄생`)
+      $.ui.toast(`Your ${egg.label} egg hatched into ${await pokemonName($, home, egg.species)}!`)
     }
     for (const egg of advanced.boxed) {
-      $.ui.toast(`PC 박스에 ${await pokemonName($, home, egg.species)} 저장 (${egg.label})`)
+      $.ui.toast(`${await pokemonName($, home, egg.species)} was sent to the PC BOX (${egg.label})`)
     }
     for (const egg of advanced.left) {
-      $.ui.toast(`키우미집에 ${egg.label} 알을 맡겼다`)
+      $.ui.toast(`Left the ${egg.label} egg at the DAY CARE`)
     }
     for (const egg of advanced.given) {
-      $.ui.toast(`키우미집에서 ${egg.label} 알을 받았다`)
+      $.ui.toast(`Got an egg from the DAY CARE for ${egg.label}`)
     }
   }
   await update($, pokedex, () => dex)
@@ -755,9 +755,9 @@ async function loadSprite($: EngineInterface, species: number) {
   }
 }
 
-// 한국어 이름. 못 받으면 도감 번호로 부른다
+// 영어 이름. 못 받으면 도감 번호로 부른다
 async function pokemonName($: EngineInterface, home: string, species: number): Promise<string> {
-  const path = `${home}/${SPRITE_DIR}/names.json`
+  const path = `${home}/${SPRITE_DIR}/names-en.json`
   let names: Record<string, string> = {}
   try {
     names = JSON.parse(await $.fs.read(path)) as Record<string, string>
@@ -771,7 +771,7 @@ async function pokemonName($: EngineInterface, home: string, species: number): P
   try {
     const res = await $.http.fetch(speciesUrl(species))
     const parsed = res.ok ? (JSON.parse(res.text) as { names?: { name: string; language: { name: string } }[] }) : null
-    const name = parsed?.names?.find(one => one.language.name === 'ko')?.name
+    const name = parsed?.names?.find(one => one.language.name === 'en')?.name
     if (name) {
       await $.fs.write(path, JSON.stringify({ ...names, [species]: name }))
       return name
@@ -932,7 +932,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'mod-hud',
-      description: '세션과 이슈 상태 패널을 열거나 닫는다. dashboard 를 붙이면 이 세션을 포켓몬 알에서 빼거나 다시 넣는다',
+      description: 'Open or close the session and issue panel. Add dashboard to take this session out of the Pokémon eggs, or put it back',
     })
     await writeStatus($, { state: 'waiting' })
     $.clock.every(HEARTBEAT_MS, () => void heartbeat($))
@@ -961,17 +961,17 @@ export const register: Register = (on, options) => {
       void refreshSessions($)
       return {
         text: isDashboard
-          ? '이 세션을 대시보드로 표시했다. 포켓몬 알이 생기지 않는다.'
-          : '대시보드 표시를 풀었다. 이 세션의 알이 다시 생긴다.',
+          ? 'Marked this session as a dashboard. It gets no Pokémon egg.'
+          : 'Unmarked this session as a dashboard. It gets eggs again.',
       }
     }
     if (await isPaneUp($)) {
       await $.ui.close({ id: PANE })
-      return { text: '패널을 닫았다.' }
+      return { text: 'Closed the panel.' }
     }
     await $.ui.open({ id: PANE, title: 'Mod HUD' })
     void refreshAll($)
-    return { text: '패널을 열었다.' }
+    return { text: 'Opened the panel.' }
   })
 
   on('prompt.submit', async ($, e, next) => {
@@ -1126,8 +1126,8 @@ export const register: Register = (on, options) => {
     const mrs = (await read($, rows)).filter(row => row.mr?.action)
     const unread = (await read($, inbox)).items.length
     const parts = [
-      { key: 'mine', count: sessions.mine.length, text: `${ICON.mine} 내 차례`, color: COLOR.mine },
-      { key: 'running', count: sessions.running.length, text: `${ICON.running} 진행`, color: COLOR.running },
+      { key: 'mine', count: sessions.mine.length, text: `${ICON.mine} Your turn`, color: COLOR.mine },
+      { key: 'running', count: sessions.running.length, text: `${ICON.running} Working`, color: COLOR.running },
       { key: 'mr', count: mrs.length, text: `${ICON.mr} MR`, color: COLOR.mr },
       { key: 'inbox', count: unread, text: `${ICON.inbox} Linear`, color: COLOR.inbox },
     ].filter(part => part.count > 0)
@@ -1175,7 +1175,7 @@ export const register: Register = (on, options) => {
             </Box>
           )
         })}
-        {sessions.mine.length > BAND_SHOWN && <Text dimColor>  외 {sessions.mine.length - BAND_SHOWN}개, /mod-hud 로 패널 열기</Text>}
+        {sessions.mine.length > BAND_SHOWN && <Text dimColor>  and {sessions.mine.length - BAND_SHOWN} more, /mod-hud opens the panel</Text>}
       </Box>
     )
   })
@@ -1219,8 +1219,8 @@ export const register: Register = (on, options) => {
     const now = await $.clock.now()
     const mrs = issueRows.filter(row => row.mr?.action)
     const hidden = [
-      sessions.hidden.stale > 0 ? `응답 없음 ${sessions.hidden.stale}` : null,
-      sessions.hidden.ended > 0 ? `종료 ${sessions.hidden.ended}` : null,
+      sessions.hidden.stale > 0 ? `unresponsive ${sessions.hidden.stale}` : null,
+      sessions.hidden.ended > 0 ? `ended ${sessions.hidden.ended}` : null,
     ].filter(Boolean)
 
     const heading = (key: keyof typeof ICON, title: string, count?: number) => (
@@ -1251,7 +1251,7 @@ export const register: Register = (on, options) => {
           <Box flexDirection="column">
             {repo?.api && (
               <Text dimColor>
-                {ICON.mr} GitLab {issues.isRefreshing ? '조회 중' : freshness(issues.refreshedAt, ISSUES_TTL_MS, now)}
+                {ICON.mr} GitLab {issues.isRefreshing ? 'fetching' : freshness(issues.refreshedAt, ISSUES_TTL_MS, now)}
               </Text>
             )}
             {/* Linear 를 연결하지 않았으면 조회 시각도 보이지 않는다 */}
@@ -1260,7 +1260,7 @@ export const register: Register = (on, options) => {
                 {ICON.inbox} Linear {freshness(notes.fetchedAt, INBOX_TTL_MS, now)}
               </Text>
             )}
-            <Button key="refresh" label="지금 새로고침" onPress={() => refreshAll($)} />
+            <Button key="refresh" label="Refresh now" onPress={() => refreshAll($)} />
           </Box>
 
           {notes.isOk && (
@@ -1291,13 +1291,13 @@ export const register: Register = (on, options) => {
                   )}
                 </Box>
               ))}
-              {notes.items.length > INBOX_SHOWN && <Text dimColor>  외 {notes.items.length - INBOX_SHOWN}개</Text>}
+              {notes.items.length > INBOX_SHOWN && <Text dimColor>  and {notes.items.length - INBOX_SHOWN} more</Text>}
             </Box>
           )}
 
           <Box flexDirection="column" marginTop={1}>
-            {heading('mine', '내 차례', sessions.mine.length)}
-            {sessions.mine.length === 0 && <Text dimColor>  나를 기다리는 세션이 없다</Text>}
+            {heading('mine', 'Your turn', sessions.mine.length)}
+            {sessions.mine.length === 0 && <Text dimColor>  No session is waiting on you</Text>}
             {sessions.mine.map(entry => {
               const kind = entry.attention?.kind ?? 'answered'
               const detail = kind === 'answered' ? entry.prompt : (entry.attention?.text ?? entry.prompt)
@@ -1322,8 +1322,8 @@ export const register: Register = (on, options) => {
           </Box>
 
           <Box flexDirection="column" marginTop={1}>
-            {heading('running', '진행 중', sessions.running.length)}
-            {sessions.running.length === 0 && <Text dimColor>  일하는 세션이 없다</Text>}
+            {heading('running', 'Working', sessions.running.length)}
+            {sessions.running.length === 0 && <Text dimColor>  No session is working</Text>}
             {sessions.running.map(entry => (
               <Box key={entry.id} flexDirection="column">
                 {sessionRow(
@@ -1336,7 +1336,7 @@ export const register: Register = (on, options) => {
                         {entry.todos.done}/{entry.todos.total}
                       </Text>
                     )}
-                    {entry.check && !entry.check.isOk && <Text color="red"> {entry.check.name} 실패</Text>}
+                    {entry.check && !entry.check.isOk && <Text color="red"> {entry.check.name} failed</Text>}
                     <Text dimColor> {formatFor(now - entry.since)}</Text>
                   </Text>,
                 )}
@@ -1362,7 +1362,7 @@ export const register: Register = (on, options) => {
                     {/* 머지 가능한 MR 은 Worktree 섹션과 같은 말로 상태만 적는다 */}
                     <Text color={row.mr?.action === 'conflict' ? 'red' : COLOR.mr}>
                       {' '}
-                      {row.mr?.action === 'conflict' ? '충돌, rebase 필요' : 'opened'}
+                      {row.mr?.action === 'conflict' ? 'conflict, needs rebase' : 'opened'}
                     </Text>
                     <Text bold> {row.branch ?? row.issue ?? ''}</Text>
                   </Button>
@@ -1386,7 +1386,7 @@ export const register: Register = (on, options) => {
                     <Text dimColor wrap="truncate-end">
                       {'    '}
                       {row.issue && row.branch ? `${row.branch}  ` : ''}
-                      {row.ahead} commits{row.dirty > 0 ? `, 변경 ${row.dirty}` : ''}
+                      {row.ahead} commits{row.dirty > 0 ? `, ${row.dirty} changed` : ''}
                     </Text>
                     {row.mr && <Text> </Text>}
                     {row.mr && (
@@ -1413,7 +1413,7 @@ export const register: Register = (on, options) => {
           {sessions.idle.length > 0 && (
             <Box flexDirection="column" marginTop={1}>
               <Text dimColor bold>
-                ○ 빈 대기 {sessions.idle.length}
+                ○ Idle {sessions.idle.length}
               </Text>
               {/* 제목과 어디서 열어 둔 것인지를 두 줄로 나눈다. 줄마다 넘치면 끝을 자른다 */}
               {sessions.idle.map(entry => (
@@ -1436,7 +1436,7 @@ export const register: Register = (on, options) => {
 
           {hidden.length > 0 && (
             <Box marginTop={1}>
-              <Text dimColor>숨김: {hidden.join(', ')}</Text>
+              <Text dimColor>Hidden: {hidden.join(', ')}</Text>
             </Box>
           )}
         </Box>
@@ -1447,18 +1447,18 @@ export const register: Register = (on, options) => {
             {eggsOnScreen(nestScene.input, nestScene.columns)
               .filter(egg => egg.stage === 'hatched')
               .map(egg => (
-                <Button key={`send-${egg.key}`} label={`박스로 보내기 · ${egg.label}`} onPress={() => sendToBox($, egg.key)} />
+                <Button key={`send-${egg.key}`} label={`Send to PC BOX · ${egg.label}`} onPress={() => sendToBox($, egg.key)} />
               ))}
             <Raster key="nest" columns={nestScene.columns} rows={nestScene.rows} cells={nestCells(nestScene, now)} />
             {boxPages(nestScene.input, nestScene.columns) > 1 && (
               <Box justifyContent="center">
-                <Button key="box-prev" label="◀ 이전" onPress={() => turnBox($, -1)} />
+                <Button key="box-prev" label="◀ Prev" onPress={() => turnBox($, -1)} />
                 <Text dimColor>
                   {'  '}
                   {boxPageOf(nestScene.input, nestScene.columns) + 1} / {boxPages(nestScene.input, nestScene.columns)}
                   {'  '}
                 </Text>
-                <Button key="box-next" label="다음 ▶" onPress={() => turnBox($, 1)} />
+                <Button key="box-next" label="Next ▶" onPress={() => turnBox($, 1)} />
               </Box>
             )}
           </Box>

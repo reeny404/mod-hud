@@ -115,16 +115,16 @@ const CATEGORY_ORDER = [
 ]
 
 const CATEGORY_LABEL: Record<string, string> = {
-  mentions: '멘션',
-  commentsAndReplies: '댓글',
-  assignments: '배정',
-  reviews: '리뷰',
-  statusChanges: '상태',
-  reminders: '리마인더',
-  triage: '트리아지',
-  subscriptions: '구독',
-  reactions: '반응',
-  documentChanges: '문서',
+  mentions: 'mention',
+  commentsAndReplies: 'comment',
+  assignments: 'assigned',
+  reviews: 'review',
+  statusChanges: 'status',
+  reminders: 'reminder',
+  triage: 'triage',
+  subscriptions: 'subscribed',
+  reactions: 'reaction',
+  documentChanges: 'document',
 }
 
 // category 가 비어 오면 type 이름으로 짐작한다
@@ -238,5 +238,5 @@ export const toastText = (fresh: readonly InboxItem[]): string => {
   }
   const title = top.title.length > TOAST_TITLE_MAX ? `${top.title.slice(0, TOAST_TITLE_MAX)}…` : top.title
   const head = `Linear ${top.issue ? `${top.issue} ` : ''}${categoryLabel(top)}: ${title}`
-  return fresh.length > 1 ? `${head} 외 ${fresh.length - 1}개` : head
+  return fresh.length > 1 ? `${head} and ${fresh.length - 1} more` : head
 }

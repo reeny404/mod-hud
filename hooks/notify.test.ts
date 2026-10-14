@@ -55,7 +55,7 @@ test('질문으로 끝난 턴은 1분 동안 답이 없을 때만 이슈 번호�
   await clock.advance(30 * 1000)
   expect(sent).toEqual([])
   await clock.advance(31 * 1000)
-  expect(sent.map(one => one.text)).toEqual(['ABC-614 질문: 추가할까요?'])
+  expect(sent.map(one => one.text)).toEqual(['ABC-614 question: 추가할까요?'])
 })
 
 test('1분 안에 답하면 알리지 않는다', async ($, on) => {

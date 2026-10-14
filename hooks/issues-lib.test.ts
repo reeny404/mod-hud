@@ -82,11 +82,11 @@ test('정리를 보류하는 경우', () => {
   const live: TreeSession = { id: 'a', cwd: merged.path, state: 'waiting', updatedAt: NOW, waitingSince: NOW - 60_000 }
   expect(cleanupBlocker({ ...merged, mr: { ...merged.mr!, state: 'opened' } }, [], '/x', NOW)).toBe('not-merged')
   expect(cleanupBlocker({ ...merged, isMain: true }, [], '/x', NOW)).toBe('not-merged')
-  expect(cleanupBlocker(merged, [live], '/x', NOW)).toBe('세션이 열려 있다')
-  expect(cleanupBlocker(merged, [{ ...live, state: 'working' }], '/x', NOW)).toBe('세션이 열려 있다')
-  expect(cleanupBlocker(merged, [], `${merged.path}/src`, NOW)).toBe('이 세션이 여기서 돌고 있다')
-  expect(cleanupBlocker({ ...merged, dirty: 3 }, [], '/x', NOW)).toBe('커밋 안 한 변경 3개')
-  expect(cleanupBlocker({ ...merged, head: 'zzz' }, [], '/x', NOW)).toBe('MR 에 없는 커밋이 있다')
+  expect(cleanupBlocker(merged, [live], '/x', NOW)).toBe('a session is open here')
+  expect(cleanupBlocker(merged, [{ ...live, state: 'working' }], '/x', NOW)).toBe('a session is open here')
+  expect(cleanupBlocker(merged, [], `${merged.path}/src`, NOW)).toBe('this session runs here')
+  expect(cleanupBlocker({ ...merged, dirty: 3 }, [], '/x', NOW)).toBe('3 uncommitted changes')
+  expect(cleanupBlocker({ ...merged, head: 'zzz' }, [], '/x', NOW)).toBe('has commits not in the MR')
 })
 
 test('하루 넘게 입력을 기다린 세션만 있으면 정리한다', () => {
@@ -94,11 +94,11 @@ test('하루 넘게 입력을 기다린 세션만 있으면 정리한다', () =>
   expect(cleanupBlocker(merged, [idle], `${merged.path}/src`, NOW)).toBeNull()
   // 같은 worktree 에 덜 기다린 세션이 하나라도 있으면 보류한다
   const fresh: TreeSession = { ...idle, id: 'b', waitingSince: NOW - DAY + 60_000 }
-  expect(cleanupBlocker(merged, [idle, fresh], '/x', NOW)).toBe('세션이 열려 있다')
+  expect(cleanupBlocker(merged, [idle, fresh], '/x', NOW)).toBe('a session is open here')
   // 예전 상태 파일처럼 대기 시작 시각이 없으면 보류한다
-  expect(cleanupBlocker(merged, [{ ...idle, waitingSince: undefined }], '/x', NOW)).toBe('세션이 열려 있다')
+  expect(cleanupBlocker(merged, [{ ...idle, waitingSince: undefined }], '/x', NOW)).toBe('a session is open here')
   // 남은 작업 검사는 그대로 한다
-  expect(cleanupBlocker({ ...merged, dirty: 1 }, [idle], '/x', NOW)).toBe('커밋 안 한 변경 1개')
+  expect(cleanupBlocker({ ...merged, dirty: 1 }, [idle], '/x', NOW)).toBe('1 uncommitted changes')
 })
 
 test('검사 명령을 찾는다', () => {

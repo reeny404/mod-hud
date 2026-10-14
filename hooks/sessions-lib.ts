@@ -199,26 +199,26 @@ export const triage = (
 export const formatAgo = (ms: number): string => {
   const minutes = Math.floor(ms / 60_000)
   if (minutes < 1) {
-    return '방금'
+    return 'just now'
   }
   if (minutes < 60) {
-    return `${minutes}분 전`
+    return `${minutes}m ago`
   }
   const hours = Math.floor(minutes / 60)
-  return hours < 24 ? `${hours}시간 전` : `${Math.floor(hours / 24)}일 전`
+  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`
 }
 
 // 기다리거나 일한 시간. 오래될수록 병목이다
 export const formatFor = (ms: number): string => {
   const minutes = Math.floor(ms / 60_000)
   if (minutes < 1) {
-    return '방금'
+    return 'just now'
   }
   if (minutes < 60) {
-    return `${minutes}분째`
+    return `for ${minutes}m`
   }
   const hours = Math.floor(minutes / 60)
-  return hours < 24 ? `${hours}시간째` : `${Math.floor(hours / 24)}일째`
+  return hours < 24 ? `for ${hours}h` : `for ${Math.floor(hours / 24)}d`
 }
 
 // transcript 에서 /resume 목록에 보이는 이름을 고른다. /rename 으로 지은 이름이 자동 제목보다 먼저고, 둘 다 마지막 것이 지금 이름이다
@@ -247,8 +247,8 @@ export const transcriptPathOf = (home: string, projectDir: string, id: string): 
 // 공유 캐시가 언제 조회됐고 다음 조회가 언제인지. 주기가 지났으면 어느 세션이든 곧 다시 부른다
 export const freshness = (fetchedAt: number | null, ttlMs: number, now: number): string => {
   if (fetchedAt === null) {
-    return '아직 조회 전'
+    return 'not fetched yet'
   }
   const left = Math.ceil((fetchedAt + ttlMs - now) / 60_000)
-  return `${formatAgo(now - fetchedAt)} 조회, ${left > 0 ? `${left}분 뒤 다시` : '곧 다시'}`
+  return `fetched ${formatAgo(now - fetchedAt)}, ${left > 0 ? `next in ${left}m` : 'refreshing soon'}`
 }

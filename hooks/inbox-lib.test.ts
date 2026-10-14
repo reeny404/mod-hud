@@ -93,7 +93,7 @@ test('멘션과 댓글이 위로, 같은 카테고리는 최신이 위로, 모�
     item({ id: 'mention', type: 'issueCommentMention', createdAt: 0 }),
   ])
   expect(sorted.map(i => i.id)).toEqual(['mention', 'new-comment', 'old-comment', 'status', 'doc', 'odd'])
-  expect(categoryLabel(item({ type: 'issueCommentMention' }))).toBe('멘션')
+  expect(categoryLabel(item({ type: 'issueCommentMention' }))).toBe('mention')
   expect(categoryLabel(item({ type: 'somethingNew' }))).toBe('somethingNew')
 })
 
@@ -137,9 +137,9 @@ test('깨진 캐시 파일은 빈 캐시로 읽는다', () => {
 
 test('토스트는 가장 위 알림 하나와 나머지 개수를 보인다', () => {
   const comment = item({ id: 'c', issue: 'ABC-615', title: '리뷰 부탁', type: 'issueNewComment' })
-  expect(toastText([comment])).toBe('Linear ABC-615 댓글: 리뷰 부탁')
+  expect(toastText([comment])).toBe('Linear ABC-615 comment: 리뷰 부탁')
   expect(toastText([item({ id: 'd', category: 'documentChanges', title: '문서' }), comment])).toBe(
-    'Linear ABC-615 댓글: 리뷰 부탁 외 1개',
+    'Linear ABC-615 comment: 리뷰 부탁 and 1 more',
   )
 })
 

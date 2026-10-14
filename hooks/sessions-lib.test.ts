@@ -152,10 +152,10 @@ test('/resume 목록의 이름을 transcript 에서 고른다', () => {
 
 test('조회한 지 얼마나 됐고 다음 조회가 언제인지 보인다', () => {
   const TTL = 15 * 60_000
-  expect(freshness(null, TTL, NOW)).toBe('아직 조회 전')
-  expect(freshness(NOW - 6 * 60_000, TTL, NOW)).toBe('6분 전 조회, 9분 뒤 다시')
-  expect(freshness(NOW - 10_000, 2 * 60_000, NOW)).toBe('방금 조회, 2분 뒤 다시')
-  expect(freshness(NOW - TTL - 1, TTL, NOW)).toBe('15분 전 조회, 곧 다시')
+  expect(freshness(null, TTL, NOW)).toBe('not fetched yet')
+  expect(freshness(NOW - 6 * 60_000, TTL, NOW)).toBe('fetched 6m ago, next in 9m')
+  expect(freshness(NOW - 10_000, 2 * 60_000, NOW)).toBe('fetched just now, next in 2m')
+  expect(freshness(NOW - TTL - 1, TTL, NOW)).toBe('fetched 15m ago, refreshing soon')
 })
 
 test('백그라운드 Bash 와 Agent 결과에서 띄운 작업 id 를 뽑는다', () => {

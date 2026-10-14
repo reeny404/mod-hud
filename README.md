@@ -12,16 +12,14 @@ It runs inside the Claude Code engine, so there is no Node, npm or React to inst
 
 | Section | Contents | Requires |
 | --- | --- | --- |
-| Your turn (내 차례) | Sessions that finished answering or stopped to ask a question. Sends an OS notification if one sits untouched for over a minute | Nothing |
-| In progress (진행 중) | Working sessions, todo progress, failing checks (pytest, ruff, mypy, pnpm test, etc.) | Nothing |
+| Your turn | Sessions that finished answering or stopped to ask a question. Sends an OS notification if one sits untouched for over a minute | Nothing |
+| Working | Working sessions, todo progress, failing checks (pytest, ruff, mypy, pnpm test, etc.) | Nothing |
 | Worktree | For each worktree of the current repo: branch, commits ahead of the base branch, number of changes, MR status | A git repo. MR status needs GitLab and a token |
 | MR | MRs that have conflicts or are ready to merge | GitLab and a token |
 | Linear Inbox | Unread Linear notifications where you were mentioned or someone replied to your comment. Status changes made by GitLab are left out | The Linear connector on claude.ai |
-| Pokémon eggs (포켓몬 알) | A nest per open session, the DAY CARE and the PC BOX at the bottom of the panel. See [Pokémon eggs](#pokémon-eggs) | A panel docked beside the transcript. `curl` and network access for sprites |
+| Pokémon eggs | A nest per open session, the DAY CARE and the PC BOX at the bottom of the panel. See [Pokémon eggs](#pokémon-eggs) | A panel docked beside the transcript. `curl` and network access for sprites |
 
 Sections whose requirements aren't met are simply hidden.
-
-The panel labels are in Korean.
 
 ## Pokémon eggs
 
@@ -31,11 +29,11 @@ At the bottom of the docked panel there is one nest per open session.
 
 - **DAY CARE (키우미집)**: refilled with 7 eggs every day at local midnight (leftovers don't carry over). The remaining count is always shown, `0` when empty. A session that starts working takes one egg. When it is empty the session stays an empty nest, and when an egg comes back a working empty session takes it.
 - **Egg**: wobbles while the session works (yellow label), cracks when the MR of its branch opens, and hatches into a bouncing Pokémon when that MR is merged. A red label means the session is waiting on you. An MR that was already merged before the egg was taken doesn't hatch it. Which of the 151 Gen 1 Pokémon it is depends on the egg.
-- **When the session closes**: a hatched Pokémon goes to the PC BOX (or press its "박스로 보내기" button to send it right away). An egg whose MR is still open stays cracked and waits for the merge. The egg of a session closed without an MR goes back to the DAY CARE.
-- **PC BOX**: page through it with the ◀ / ▶ buttons under it once it fills a page.
+- **When the session closes**: a hatched Pokémon goes to the PC BOX (or press its "Send to PC BOX" button to send it right away). An egg whose MR is still open stays cracked and waits for the merge. The egg of a session closed without an MR goes back to the DAY CARE.
+- **PC BOX**: page through it with the ◀ Prev / Next ▶ buttons under it once it fills a page.
 - A session you use as a dashboard can be left out with `/mod-hud dashboard` (run it again to undo).
 
-Everything is kept in `~/.claude/mod-hud-pokedex.json`, shared across sessions and repos. Sprites (Gen VII box icons) and Korean names come from [PokeAPI](https://pokeapi.co) the first time they're needed and are cached in `~/.claude/mod-hud-sprites/`; until then a Poké Ball stands in.
+Everything is kept in `~/.claude/mod-hud-pokedex.json`, shared across sessions and repos. Sprites (Gen VII box icons) and English names come from [PokeAPI](https://pokeapi.co) the first time they're needed and are cached in `~/.claude/mod-hud-sprites/`; until then a Poké Ball stands in.
 
 ## Install
 
@@ -102,7 +100,7 @@ When on, each worktree check (every 2 minutes) removes only worktrees that meet 
 - No session is open in that worktree. A session that has only been waiting for input for over a day doesn't count as open
 
 It removes the worktree with `git worktree remove`, then deletes the local branch with `git branch -D`. `-D` is used so squash-merged branches are removed too, and the HEAD check above ensures no commits missing from the MR are lost.
-Each removal shows a toast and leaves a line under the Worktree section. If any condition fails, it keeps the worktree and shows the reason as `머지됨, 정리 보류: ...` ("merged, cleanup on hold: ...").
+Each removal shows a toast and leaves a line under the Worktree section. If any condition fails, it keeps the worktree and shows the reason as `merged, cleanup on hold: ...`.
 
 ## Known limitations
 
