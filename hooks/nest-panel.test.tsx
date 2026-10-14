@@ -113,6 +113,45 @@ test('옆에 붙은 패널은 DAY CARE 머리줄에 맡긴 포켓몬과 경험�
   await pane.unmount()
 })
 
+test('최종 진화형이 맡겨져 있으면 MAX 로 보이고 Take back 버튼이 있으며, 막 온 전설은 등장 장면을 겹쳐 띄운다', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const dex: Pokedex = { ...emptyPokedex(), box: [entry('legend:146', 146, 0), entry('a', 19, 1), entry('b', 6, 2)], lead: 'b', chosen: true, xp: 0, arrival: { species: 146, at: NOW - 3000 } }
+  on('env.get', () => ({ value: '/home/test' }))
+  on('fs.exists', ($, e) => ({ value: (e as unknown as { path: string }).path.endsWith('mod-hud-pokedex.json') }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.read', ($, e) => {
+    const path = (e as unknown as { path: string }).path
+    if (path.endsWith('mod-hud-pokedex.json')) {
+      return { value: JSON.stringify(dex) }
+    }
+    if (path.endsWith('names-en.json')) {
+      return { value: JSON.stringify({ 19: 'Rattata', 6: 'Charizard', 146: 'Moltres' }) }
+    }
+    throw new Error('ENOENT')
+  })
+  on('fs.write', () => ({ value: undefined }))
+  on('http.fetch', () => ({ value: { ok: false, status: 404, text: '' } }) as never)
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('command.register', () => ({ value: { name: 'x' } }) as never)
+  on('session.id', () => ({ value: 'self' }))
+  on('session.cwd', () => ({ value: '/p/a' }))
+  on('session.repo', () => ({ value: null }))
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.blit', () => ({ value: { deny: false } }) as never)
+  on('session.start', ($, e) => e as never)
+  await $.session.start({ source: 'startup', cwd: '/p/a' } as never)
+
+  const props = { placement: 'dock', bodyColumns: 60, scroll: { bodyRows: 60 } }
+  const pane = await $.ui.mount({ plugin: 'mod-hud', surface: 'terminal', component: 'Pane', requestId: 'mod-hud', props } as never)
+  const tree = await pane.drawn()
+  expect(nodes(tree, 'Button', { key: 'daycare-toggle' }).map(textOf).join('')).toContain('★ Charizard MAX')
+  expect(nodes(tree, 'Button', { key: 'takeback-b', label: 'Take back' }).length).toBe(1)
+  expect(nodes(tree, 'Button', { key: 'lead-a' }).length).toBe(1)
+  // 막 온 전설은 알과 DAY CARE 위에 등장 장면을 겹쳐 띄운다
+  expect(nodes(tree, 'Raster', { key: 'arrival' }).length).toBe(1)
+  await pane.unmount()
+})
+
 test('다른 세션이 조금 전에 적은 진화도 이 패널이 처음 보면 그 칸의 페이지로 넘겨 보인다', async ($, on) => {
   mock.clock(on, { now: NOW })
   const dex: Pokedex = { ...emptyPokedex(), box: [entry('a', 19, 1), entry('b', 6, 2), entry('c', 16, 3), entry('d', 20, 4)], lead: null, xp: 0, evolving: { key: 'd', from: 19, at: NOW - 20_000 } }

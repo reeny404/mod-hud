@@ -3,6 +3,8 @@ import { expect, test } from 'claude-code/testing'
 import type { DexEgg, HeldEgg, Pokedex, SessionStatus } from '../types'
 import {
   advancePokedex,
+  ARRIVAL_FRAMES,
+  ARRIVAL_ROWS,
   boxOnPage,
   boxPageOf,
   boxPageOfKey,
@@ -11,6 +13,7 @@ import {
   CELEBRATE_MS,
   DAILY_EGGS,
   DAYCARE_GROUND_ROWS,
+  drawArrival,
   drawBoxTile,
   daycareGroundRows,
   drawDaycareGround,
@@ -685,4 +688,26 @@ test('맡긴 포켓몬이 진화하는 동안은 풀밭 가운데 멈춰 서서 
   // 걷지 않고 가운데 서 있다
   const xs = new Set(frames.map(cells => Math.min(...columnsOf(cells, OLD), ...columnsOf(cells, NEW))))
   expect([...xs]).toEqual([9])
+})
+
+test('전설 등장 장면은 줄무늬로 덮이고 전설이 나타난 뒤 몬스터볼에 잡히며 아래 줄에 글이 바뀐다', () => {
+  const sprite: SpriteLookup = () => ({ width: 4, height: 4, px: Array.from({ length: 16 }, () => 0x123456) })
+  const width = 50
+  const caption = (cells: Uint32Array) => {
+    let text = ''
+    for (let x = 0; x < width; x++) {
+      text += String.fromCharCode(cells[((ARRIVAL_ROWS - 1) * width + x) * 3]!)
+    }
+    return text.trim()
+  }
+  const at = (step: number) => drawArrival(146, 'Moltres', width, step, sprite)
+  expect(at(0).length).toBe(width * ARRIVAL_ROWS * 3)
+  // 처음에는 전설이 보이지 않다가 나타난다
+  expect(Array.from(at(0)).includes(0x123456)).toBe(false)
+  expect(Array.from(at(12)).includes(0x123456)).toBe(true)
+  expect(caption(at(12))).toBe('A wild MOLTRES appeared!')
+  expect(caption(at(31))).toBe('Gotcha! MOLTRES was caught!')
+  expect(caption(at(ARRIVAL_FRAMES - 1))).toBe('MOLTRES was sent to the PC BOX')
+  // 몬스터볼이 흔들린다
+  expect(at(22)).not.toEqual(at(23))
 })

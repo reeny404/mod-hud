@@ -870,6 +870,69 @@ export function boxOnPage(input: NestInput, width: number): BoxEntry[] {
   return input.box.slice(page * size, (page + 1) * size)
 }
 
+// 전설 등장 장면. 원작의 야생 포켓몬 배틀처럼 줄무늬로 화면이 덮이고, 전설이 나타나고, 몬스터볼에 잡힌다
+// 그림 12줄과 글 한 줄. 프레임(250ms)마다 한 걸음이고 ARRIVAL_FRAMES 걸음이면 끝난다
+export const ARRIVAL_FRAMES = 36
+export const ARRIVAL_ROWS = 13
+const ARRIVAL_HEIGHT = (ARRIVAL_ROWS - 1) * 2
+const ARRIVAL_SIZE = 24
+const ARRIVAL_PAPER = 0xf8f8f0
+const ARRIVAL_INK = 0x202020
+
+export function drawArrival(species: number, name: string, width: number, step: number, lookup: SpriteLookup): Uint32Array {
+  const canvas = canvasOf(width, ARRIVAL_HEIGHT)
+  canvas.px.fill(ARRIVAL_PAPER)
+  const shout = name.toUpperCase()
+  const image = lookup(species, ARRIVAL_SIZE)
+  const legendX = Math.floor(width / 2) - 14
+  const ballX = Math.floor(width / 2) - 4
+  const ballY = ARRIVAL_HEIGHT - 10
+  const legend = (x: number) => {
+    if (image) {
+      blit(canvas, x, ARRIVAL_HEIGHT - image.height, image)
+    } else {
+      sprite(canvas, x, ARRIVAL_HEIGHT - 8, BALL, BALL_PALETTE)
+    }
+  }
+  let caption = ''
+  if (step < 6) {
+    // 두 줄씩 번갈아 왼쪽과 오른쪽에서 검은 띠가 들어온다
+    const reach = Math.min(width, Math.ceil(((step + 1) * width) / 5))
+    for (let y = 0; y < ARRIVAL_HEIGHT; y++) {
+      for (let i = 0; i < reach; i++) {
+        put(canvas, Math.floor(y / 2) % 2 === 0 ? i : width - 1 - i, y, ARRIVAL_INK)
+      }
+    }
+  } else if (step < 16) {
+    // 오른쪽에서 미끄러져 들어온다
+    legend(Math.max(legendX, width - (step - 6) * 10))
+    caption = `A wild ${shout} appeared!`
+  } else if (step < 20) {
+    // 몬스터볼이 날아가는 동안 전설이 깜빡인다
+    if (step % 2 === 0) {
+      legend(legendX)
+    }
+    sprite(canvas, 2 + (step - 16) * Math.floor((ballX - 2) / 3), ballY - (step - 16) * 2, BALL, BALL_PALETTE)
+    caption = 'Go! POKe BALL!'
+  } else if (step < 32) {
+    // 세 번 흔들리고 잡힌다
+    const isCaught = step >= 30
+    const shake = isCaught ? 0 : ([0, -1, 0, 1][(step - 20) % 4] ?? 0)
+    sprite(canvas, ballX + shake, ballY, BALL, BALL_PALETTE)
+    if (isCaught) {
+      drawSparkles(canvas, ballX - 6, ballY - 6, 20, 14, step)
+    }
+    caption = isCaught ? `Gotcha! ${shout} was caught!` : '...'
+  } else {
+    sprite(canvas, ballX, ballY, BALL, BALL_PALETTE)
+    caption = `${shout} was sent to the PC BOX`
+  }
+  const out: number[] = []
+  pixelCells(canvas, out)
+  textCells(width, [{ at: Math.max(0, Math.floor((width - caption.length) / 2)), text: caption, color: C.boxBarText }], ARRIVAL_INK, out)
+  return Uint32Array.from(out)
+}
+
 // 박스 아이콘의 원본 크기(7세대 아이콘은 40x30). 마우스를 올리면 뜨는 카드에 줄이지 않고 그린다
 const PORTRAIT_SIZE = 40
 

@@ -45,15 +45,18 @@ import {
   readEnvValue,
 } from './issues-lib'
 import { canEvolve } from './dex-data'
-import { advanceEvolution, xpBar, xpLeft } from './evolve-lib'
+import { advanceEvolution, TAKE_BACK, xpBar, xpLeft } from './evolve-lib'
 import {
   advancePokedex,
+  ARRIVAL_FRAMES,
+  ARRIVAL_ROWS,
   boxOnPage,
   boxPageOf,
   boxPageOfKey,
   boxPages,
   boxPerRow,
   daycareGroundRows,
+  drawArrival,
   drawBoxTile,
   drawDaycareGround,
   drawNest,
@@ -884,6 +887,24 @@ let evolvingSeen = 0
 let evolvingSeenAt = 0
 // 이보다 오래된 진화는 처음 봐도 깜빡이지 않는다. 다른 세션이 기록을 읽는 간격보다 넉넉하다
 const EVOLVING_FRESH_MS = 60 * 1000
+// 이 패널이 마지막으로 본 전설 등장(기록에 적힌 시각)과, 그 등장 장면을 처음 보인 이 세션의 시각
+let arrivalSeen = 0
+let arrivalShown: { species: number; at: number; name: string } | null = null
+const ARRIVAL_COLUMNS = 60
+
+// 지금 보일 등장 장면의 걸음. 끝났으면 null
+function arrivalStep(now: number): number | null {
+  if (!arrivalShown) {
+    return null
+  }
+  const step = Math.floor((now - arrivalShown.at) / NEST_TICK_MS)
+  return step < ARRIVAL_FRAMES ? step : null
+}
+
+function arrivalCells(columns: number, now: number): string {
+  const shown = arrivalShown!
+  return base64Of(drawArrival(shown.species, shown.name, Math.min(columns, ARRIVAL_COLUMNS), arrivalStep(now) ?? 0, lookupSprite))
+}
 // PC BOX 와 DAY CARE 머리줄의 글자. 박스 수와, 키우미집에 맡겨 키우는 포켓몬의 경험치. ★ 와 막대는 Raster 가 못 그려 Text 로 그린다
 let boxHeader: { count: number; lead: string | null } = { count: 0, lead: null }
 // PC BOX 를 접었는지. 접으면 머리줄만 보인다
@@ -994,6 +1015,15 @@ async function tickNest($: EngineInterface) {
     nestScene.rows > 0 ? await $.ui.blit({ requestId: PANE, key: 'nest', cells: nestCells(nestScene, now) }) : null,
     daycareCollapsed ? null : await $.ui.blit({ requestId: PANE, key: 'daycare', cells: daycareCells(nestScene, now) }),
   ].filter(one => one !== null)
+  // 전설 등장 장면을 한 걸음씩 칠하고, 끝나면 장면을 걷어 내게 다시 그린다
+  if (arrivalShown) {
+    if (arrivalStep(now) === null) {
+      arrivalShown = null
+      $.ui.invalidate('ui.render')
+    } else {
+      await $.ui.blit({ requestId: PANE, key: 'arrival', cells: arrivalCells(nestScene.columns, now) })
+    }
+  }
   // 막 진화한 박스 칸만 깜빡이므로 그 칸만 다시 칠한다
   const evolving = nestScene.input.evolving
   if (evolving && now - evolving.at < EVOLVE_MS && !boxCollapsed) {
@@ -1417,12 +1447,21 @@ export const register: Register = (on, options) => {
         boxPage = boxPageOfKey({ eggs: [], daycare: [], box: dex.box, boxPage }, columns, dex.evolving.key)
       }
       const evolving = dex.evolving && dex.evolving.at === evolvingSeen ? { ...dex.evolving, at: evolvingSeenAt } : null
+      // 막 온 전설을 처음 보면 이 세션의 시각부터 등장 장면을 센다
+      if (dex.arrival && dex.arrival.at !== arrivalSeen && now - dex.arrival.at < EVOLVING_FRESH_MS) {
+        arrivalSeen = dex.arrival.at
+        arrivalShown = { species: dex.arrival.species, at: now, name: await shownName($, home, dex.arrival.species) }
+        void loadSprite($, dex.arrival.species)
+      }
       const input = { eggs: await read($, eggs), daycare: dex.daycare, box: dex.box, boxPage, lead: dex.lead, evolving }
       nestScene = { columns, rows: nestRows(input, columns), input }
       const lead = dex.box.find(entry => entry.key === dex.lead)
       boxHeader = {
         count: dex.box.length,
-        lead: lead ? `★ ${await shownName($, home, lead.species)} ${xpBar(dex.xp)} ${xpLeft(dex.xp)}` : null,
+        // 최종 진화형은 더 진화하지 않아 경험치 대신 MAX 로 보인다
+        lead: lead
+          ? `★ ${await shownName($, home, lead.species)} ${canEvolve(lead.species) ? `${xpBar(dex.xp)} ${xpLeft(dex.xp)}` : 'MAX'}`
+          : null,
       }
       boxCards = new Map()
       for (const entry of boxOnPage(input, columns)) {
@@ -1648,6 +1687,17 @@ export const register: Register = (on, options) => {
               .map(egg => (
                 <Button key={`send-${egg.key}`} label={`Send to PC BOX · ${egg.label}`} onPress={() => sendToBox($, egg.key)} />
               ))}
+            {arrivalStep(now) !== null && (
+              // 막 온 전설의 등장 장면을 알과 DAY CARE 위에 겹쳐 띄운다. 다른 줄을 밀어내지 않는다
+              <Box position="absolute" top={0} width={nestScene.columns} justifyContent="center">
+                <Raster
+                  key="arrival"
+                  columns={Math.min(nestScene.columns, ARRIVAL_COLUMNS)}
+                  rows={ARRIVAL_ROWS}
+                  cells={arrivalCells(nestScene.columns, now)}
+                />
+              </Box>
+            )}
             {nestScene.rows > 0 && (
               <Raster key="nest" columns={nestScene.columns} rows={nestScene.rows} cells={nestCells(nestScene, now)} />
             )}
@@ -1735,6 +1785,11 @@ export const register: Register = (on, options) => {
                         {boxCards.get(entry.key)!.canLead && (
                           <Box justifyContent="center" width="100%">
                             <Button key={`lead-${entry.key}`} label="Leave at DAY CARE" onPress={() => pickLead($, entry.key)} />
+                          </Box>
+                        )}
+                        {entry.key === nestScene!.input.lead && (
+                          <Box justifyContent="center" width="100%">
+                            <Button key={`takeback-${entry.key}`} label="Take back" onPress={() => pickLead($, TAKE_BACK)} />
                           </Box>
                         )}
                       </Box>
