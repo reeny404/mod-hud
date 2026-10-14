@@ -43,6 +43,7 @@ import {
   parseWorktrees,
   readEnvValue,
 } from './issues-lib'
+import { advanceEvolution } from './evolve-lib'
 import {
   advancePokedex,
   boxPageOf,
@@ -591,6 +592,8 @@ async function refreshIssues($: EngineInterface, isForced: boolean) {
 const POKEDEX_FILE = '.claude/mod-hud-pokedex.json'
 // 박스로 보내기 요청. 어느 세션에서 눌러도 알 key 이름의 빈 파일을 두고, 기록을 쓰는 세션이 읽어 박스에 넣은 뒤 지운다
 const SENDBOX_DIR = '.claude/mod-hud-sendbox'
+// 앞장세우기 요청. 어느 세션에서 눌러도 박스 칸 key 를 이 파일에 쓰고, 기록을 쓰는 세션이 읽어 반영한 뒤 지운다
+const LEAD_FILE = '.claude/mod-hud-lead'
 // 세션이 닫힌 뒤 머지를 기다리는 알의 MR 을 다시 조회하는 간격
 const PENDING_CHECK_MS = 2 * 60 * 1000
 
@@ -642,6 +645,24 @@ async function sendToBox($: EngineInterface, key: string) {
   void refreshSessions($)
 }
 
+async function pickLead($: EngineInterface, key: string) {
+  const home = await $.env.get('HOME')
+  if (!home) {
+    return
+  }
+  await $.fs.write(`${home}/${LEAD_FILE}`, key)
+  void refreshSessions($)
+}
+
+async function readLeadRequest($: EngineInterface, home: string): Promise<string | null> {
+  try {
+    const path = `${home}/${LEAD_FILE}`
+    return (await $.fs.exists(path)) ? (await $.fs.read(path)).trim() || null : null
+  } catch {
+    return null
+  }
+}
+
 async function readSendRequests($: EngineInterface, home: string): Promise<string[]> {
   const dir = `${home}/${SENDBOX_DIR}`
   try {
@@ -666,13 +687,18 @@ async function keepPokedex($: EngineInterface, sessions: SessionStatus[], now: n
     }
     const requests = await readSendRequests($, home)
     const advanced = advancePokedex(dex, sessions, now, requests)
-    dex = advanced.dex
+    const pick = await readLeadRequest($, home)
+    const grown = advanceEvolution(advanced.dex, sessions, now, pick)
+    dex = grown.dex
     if (JSON.stringify(dex) !== before) {
       await $.fs.write(`${home}/${POKEDEX_FILE}`, JSON.stringify(dex))
     }
     // 부화하지 않은 알의 요청은 버튼이 없어 생기지 않으니, 읽은 요청은 모두 지운다
     for (const name of requests) {
       await $.process.run(['rm', '-f', `${home}/${SENDBOX_DIR}/${name}`])
+    }
+    if (pick !== null) {
+      await $.process.run(['rm', '-f', `${home}/${LEAD_FILE}`])
     }
     for (const egg of advanced.born) {
       $.ui.toast(`Your ${egg.label} egg hatched into ${await pokemonName($, home, egg.species)}!`)
@@ -685,6 +711,12 @@ async function keepPokedex($: EngineInterface, sessions: SessionStatus[], now: n
     }
     for (const egg of advanced.given) {
       $.ui.toast(`Got an egg from the DAY CARE for ${egg.label}`)
+    }
+    for (const { entry, from } of grown.evolved) {
+      $.ui.toast(`What? ${await pokemonName($, home, from)} evolved into ${await pokemonName($, home, entry.species)}!`)
+    }
+    for (const entry of grown.legends) {
+      $.ui.toast(`The legendary ${await pokemonName($, home, entry.species)} appeared in the PC BOX!`)
     }
   }
   await update($, pokedex, () => dex)
