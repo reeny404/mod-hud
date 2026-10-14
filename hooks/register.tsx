@@ -46,6 +46,7 @@ import {
 } from './issues-lib'
 import { canEvolve } from './dex-data'
 import { advanceEvolution, TAKE_BACK, xpBar, xpLeft } from './evolve-lib'
+import { helpText, isHelp } from './help-lib'
 import type { EncounterAction } from './evolve-lib'
 import {
   advancePokedex,
@@ -1181,7 +1182,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'mod-hud',
-      description: 'Open or close the session and issue panel. Add dashboard to take this session out of the Pokémon eggs, or put it back',
+      description: 'Open or close the session and issue panel. dashboard takes this session out of the Pokémon eggs; --help shows the settings',
     })
     await writeStatus($, { state: 'waiting' })
     $.clock.every(HEARTBEAT_MS, () => void heartbeat($))
@@ -1204,6 +1205,9 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'mod-hud' }, async ($, e) => {
+    if (isHelp(e.args)) {
+      return { text: helpText() }
+    }
     if (e.args.trim() === 'dashboard') {
       const isDashboard = !mine?.isDashboard
       await writeStatus($, { isDashboard })
