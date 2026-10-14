@@ -882,6 +882,8 @@ let evolvingSeenAt = 0
 const EVOLVING_FRESH_MS = 60 * 1000
 // PC BOX 머리줄. 한국어 대신 영어 이름이지만 ★ 와 막대는 Raster 가 못 그려 Text 로 그린다
 let boxHeader: { count: number; lead: string | null } = { count: 0, lead: null }
+// PC BOX 를 접었는지. 접으면 머리줄의 앞장 정보만 보인다
+let boxCollapsed = false
 // 박스 칸에 마우스를 올리면 뜨는 카드의 글자. 칸 key 로 찾는다
 let boxCards = new Map<string, { name: string; caught: string; next: string | null; canLead: boolean }>()
 // 카드 폭. 원본 아이콘 40칸과 테두리
@@ -957,7 +959,7 @@ async function tickNest($: EngineInterface) {
   const painted = await $.ui.blit({ requestId: PANE, key: 'nest', cells: nestCells(nestScene, now) })
   // 막 진화한 박스 칸만 깜빡이므로 그 칸만 다시 칠한다
   const evolving = nestScene.input.evolving
-  if (evolving && now - evolving.at < EVOLVE_MS) {
+  if (evolving && now - evolving.at < EVOLVE_MS && !boxCollapsed) {
     const tiles = boxTiles(nestScene)
     const at = tiles.findIndex(entry => entry?.key === evolving.key)
     if (at >= 0) {
@@ -1610,56 +1612,69 @@ export const register: Register = (on, options) => {
               ))}
             <Raster key="nest" columns={nestScene.columns} rows={nestScene.rows} cells={nestCells(nestScene, now)} />
             <Box backgroundColor="#3a6ea5" width={nestScene.columns} paddingX={1}>
-              <Text bold color="#ffffff" wrap="truncate-end">
-                PC BOX
-                {boxPages(nestScene.input, nestScene.columns) > 1 &&
-                  `  ${boxPageOf(nestScene.input, nestScene.columns) + 1}/${boxPages(nestScene.input, nestScene.columns)}`}
+              {/* 머리줄을 누르면 박스를 접거나 편다 */}
+              <Button
+                plain
+                key="box-toggle"
+                onPress={() => {
+                  boxCollapsed = !boxCollapsed
+                  $.ui.invalidate('ui.render')
+                }}
+              >
+                <Text bold color="#ffffff">
+                  {boxCollapsed ? '▸' : '▾'} PC BOX
+                  {!boxCollapsed &&
+                    boxPages(nestScene.input, nestScene.columns) > 1 &&
+                    `  ${boxPageOf(nestScene.input, nestScene.columns) + 1}/${boxPages(nestScene.input, nestScene.columns)}`}
+                </Text>
                 {boxHeader.lead && <Text color="#ffe080">{`  ${boxHeader.lead}`}</Text>}
-              </Text>
+              </Button>
               <Box flexGrow={1} />
               <Text bold color="#ffe080">
                 {boxHeader.count}
               </Text>
             </Box>
-            <Box justifyContent="center">
-              {boxTiles(nestScene).map((entry, i) => (
-                <Box key={`tile-${i}`}>
-                  <Raster key={`tile-${i}`} columns={TILE} rows={TILE_ROWS} cells={tileCells(nestScene!, entry, now)} />
-                  {entry && boxCards.has(entry.key) && (
-                    // 마우스를 올린 칸 위로 원본 크기 카드를 띄운다. 다른 줄을 밀어내지 않게 겹쳐 그린다
-                    <Box
-                      position="absolute"
-                      bottom={TILE_ROWS}
-                      left={cardPlace(nestScene!.columns, i).left}
-                      width={cardPlace(nestScene!.columns, i).width}
-                      display="none"
-                      hover={{ display: 'flex' }}
-                      flexDirection="column"
-                      alignItems="center"
-                      borderStyle="round"
-                      backgroundColor={CARD_BACKGROUND_HEX}
-                    >
-                      {(() => {
-                        const portrait = drawPortrait(entry.species, lookupSprite, CARD_BACKGROUND)
-                        return (
-                          portrait && (
-                            <Raster key={`portrait-${i}`} columns={portrait.columns} rows={portrait.rows} cells={base64Of(portrait.cells)} />
+            {!boxCollapsed && (
+              <Box justifyContent="center">
+                {boxTiles(nestScene).map((entry, i) => (
+                  <Box key={`tile-${i}`}>
+                    <Raster key={`tile-${i}`} columns={TILE} rows={TILE_ROWS} cells={tileCells(nestScene!, entry, now)} />
+                    {entry && boxCards.has(entry.key) && (
+                      // 마우스를 올린 칸 위로 원본 크기 카드를 띄운다. 다른 줄을 밀어내지 않게 겹쳐 그린다
+                      <Box
+                        position="absolute"
+                        bottom={TILE_ROWS}
+                        left={cardPlace(nestScene!.columns, i).left}
+                        width={cardPlace(nestScene!.columns, i).width}
+                        display="none"
+                        hover={{ display: 'flex' }}
+                        flexDirection="column"
+                        alignItems="center"
+                        borderStyle="round"
+                        backgroundColor={CARD_BACKGROUND_HEX}
+                      >
+                        {(() => {
+                          const portrait = drawPortrait(entry.species, lookupSprite, CARD_BACKGROUND)
+                          return (
+                            portrait && (
+                              <Raster key={`portrait-${i}`} columns={portrait.columns} rows={portrait.rows} cells={base64Of(portrait.cells)} />
+                            )
                           )
-                        )
-                      })()}
-                      <Text bold>{boxCards.get(entry.key)!.name}</Text>
-                      <Text dimColor>caught {boxCards.get(entry.key)!.caught}</Text>
-                      {boxCards.get(entry.key)!.next && <Text>→ {boxCards.get(entry.key)!.next}</Text>}
-                      {entry.key === nestScene!.input.lead && <Text color="#ffe080">{boxHeader.lead}</Text>}
-                      {boxCards.get(entry.key)!.canLead && (
-                        <Button key={`lead-${entry.key}`} label="Set as lead" onPress={() => pickLead($, entry.key)} />
-                      )}
-                    </Box>
-                  )}
-                </Box>
-              ))}
-            </Box>
-            {boxPages(nestScene.input, nestScene.columns) > 1 && (
+                        })()}
+                        <Text bold>{boxCards.get(entry.key)!.name}</Text>
+                        <Text dimColor>caught {boxCards.get(entry.key)!.caught}</Text>
+                        {boxCards.get(entry.key)!.next && <Text>→ {boxCards.get(entry.key)!.next}</Text>}
+                        {entry.key === nestScene!.input.lead && <Text color="#ffe080">{boxHeader.lead}</Text>}
+                        {boxCards.get(entry.key)!.canLead && (
+                          <Button key={`lead-${entry.key}`} label="Set as lead" onPress={() => pickLead($, entry.key)} />
+                        )}
+                      </Box>
+                    )}
+                  </Box>
+                ))}
+              </Box>
+            )}
+            {!boxCollapsed && boxPages(nestScene.input, nestScene.columns) > 1 && (
               <Box justifyContent="center">
                 <Button key="box-prev" label="◀ Prev" onPress={() => turnBox($, -1)} />
                 <Button key="box-next" label="Next ▶" onPress={() => turnBox($, 1)} />
