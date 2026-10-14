@@ -1,10 +1,11 @@
 // 패널 아래 빈 자리에 그리는 포켓몬 알, 키우미집, PC 박스
-// 열린 세션마다 알이 하나 있다. 세션이 일하면 흔들리고, 그 브랜치의 MR 이 열리면 금이 가고, 머지되면 포켓몬이 나온다
-// 세션이 닫히면 부화한 포켓몬은 박스로, MR 없이 닫힌 알은 키우미집으로 간다. 금 간 알은 머지될 때까지 남아 기다린다
+// 키우미집에는 매일 알 7개가 들어오고, 알 없는 세션은 진행 중이 되면 하나를 받는다
+// 세션이 일하면 알이 흔들리고, 그 브랜치의 MR 이 열리면 금이 가고, 머지되면 포켓몬이 나온다
+// 세션이 닫히면 부화한 포켓몬은 박스로, MR 없이 닫힌 알은 키우미집으로 돌아간다. 금 간 알은 머지될 때까지 남아 기다린다
 // 기록은 모든 저장소와 세션이 같이 쓰는 파일에 남는다
 // 포켓몬은 1세대 도감 번호로만 정해 두고, 그림은 MR 이 열리거나 박스를 열 때 불러온 스프라이트로 그린다
 
-import type { BoxEntry, DexEgg, NestEgg, Pokedex, SessionStatus } from '../types'
+import type { BoxEntry, DexEgg, HeldEgg, NestEgg, Pokedex, SessionStatus } from '../types'
 import { isLongLivedBranch, parseIssue } from './issues-lib'
 import type { Pixels } from './png-lib'
 import { CLEAR } from './png-lib'
@@ -14,7 +15,7 @@ export type Egg = NestEgg
 export type Stage = NestEgg['stage']
 
 // boxPage 는 0부터 센 박스 페이지. 넘치면 마지막 페이지로 당긴다
-export type NestInput = { eggs: Egg[]; daycare: DexEgg[]; box: BoxEntry[]; boxPage: number }
+export type NestInput = { eggs: Egg[]; daycare: HeldEgg[]; box: BoxEntry[]; boxPage: number }
 
 // 불러온 스프라이트를 size 안에 들어가게 줄여 준다. 아직 없으면 undefined
 export type SpriteLookup = (species: number, size: number) => Pixels | undefined
@@ -147,12 +148,30 @@ function hash(text: string): number {
   return n >>> 0
 }
 
-// 세션마다 정해지는 1세대 도감 번호
+// 알 key 마다 정해지는 1세대 도감 번호
 export function speciesOf(key: string): number {
   return (hash(key) % DEX_SIZE) + 1
 }
 
-export const emptyPokedex = (): Pokedex => ({ hatched: {}, pending: [], daycare: [], box: [], claims: {}, done: [], sent: {} })
+// 키우미집에 매일 새로 채우는 알 수
+export const DAILY_EGGS = 7
+
+// 로컬 시간대의 날짜 YYYY-MM-DD. 이 날짜가 바뀌면 키우미집을 새로 채운다
+export function localDay(now: number): string {
+  const date = new Date(now)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+// 그날 키우미집에 들어오는 알. 날짜와 순번으로 key 를 지어 종도 날마다 정해진다
+export function freshEggs(day: string): HeldEgg[] {
+  return Array.from({ length: DAILY_EGGS }, (_, i) => {
+    const key = `day:${day}:${i + 1}`
+    return { key, species: speciesOf(key) }
+  })
+}
+
+export const emptyPokedex = (): Pokedex => ({ day: '', hatched: {}, pending: [], daycare: [], box: [], holds: {}, done: [], sent: {} })
 
 export function parsePokedex(text: string): Pokedex {
   try {
@@ -160,14 +179,19 @@ export function parsePokedex(text: string): Pokedex {
     const eggs = <T extends { species?: unknown }>(list: unknown): T[] =>
       Array.isArray(list) ? (list as T[]).filter(entry => typeof entry?.species === 'number') : []
     const record = <T>(value: unknown): Record<string, T> => (value && typeof value === 'object' ? (value as Record<string, T>) : {})
+    // 옛 기록의 sent 는 { count, branch } 라 버린다
+    const sent = Object.entries(record<unknown>(Array.isArray(parsed.sent) ? {} : parsed.sent)).filter(
+      (entry): entry is [string, string | null] => typeof entry[1] === 'string' || entry[1] === null,
+    )
     return {
+      day: typeof parsed.day === 'string' ? parsed.day : '',
       hatched: record(parsed.hatched),
       pending: eggs(parsed.pending),
       daycare: eggs(parsed.daycare),
       box: eggs(parsed.box),
-      claims: record(parsed.claims),
+      holds: record(parsed.holds),
       done: Array.isArray(parsed.done) ? parsed.done : [],
-      sent: Array.isArray(parsed.sent) ? {} : record(parsed.sent),
+      sent: Object.fromEntries(sent),
     }
   } catch {
     return emptyPokedex()
@@ -201,28 +225,21 @@ export function labelOf(session: Pick<SessionStatus, 'branch' | 'project'>): str
 
 type Sent = Pokedex['sent']
 
-// 세션의 지금 알. 박스로 보낼 때마다 새 알이 생겨 key 에 몇 번째인지 붙는다
-export function eggKeyOf(sent: Sent, id: string): string {
-  const count = sent[id]?.count ?? 0
-  return count > 0 ? `${id}#${count}` : id
-}
-
-// 지금 알에 쓰는 MR 상태. 박스로 보낸 뒤 같은 브랜치에 머무는 동안은 이미 머지된 MR 이라 치지 않는다
+// 지금 알에 쓰는 MR 상태. 박스로 보냈거나 알을 받을 때 이미 머지된 브랜치에 머무는 동안은 머지되지 않은 것으로 친다
 function mrStateOf(sent: Sent, session: SessionStatus): string | null {
-  const last = sent[session.id]
-  return last && last.branch === session.branch ? null : (session.mrState ?? null)
+  return sent[session.id] !== undefined && sent[session.id] === session.branch ? null : (session.mrState ?? null)
 }
-
-const speciesFor = (dex: Pokedex, id: string) => dex.claims[id] ?? speciesOf(eggKeyOf(dex.sent, id))
 
 // 세션 상태와 기록을 맞춘다. 기록을 쓰는 세션이 세션 목록을 읽을 때마다 부른다
 // requests 는 박스로 보내기를 누른 알의 key. 부화한 알만 보낸다
-// born 은 이번에 부화한 알, boxed 는 박스에 넣은 포켓몬, left 는 키우미집에 맡긴 알, claimed 는 키우미집에서 데려온 알
+// born 은 이번에 부화한 알, boxed 는 박스에 넣은 포켓몬, left 는 키우미집에 맡긴 알, given 은 키우미집에서 받은 알
 export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[], now: number, requests: readonly string[] = []) {
+  const today = localDay(now)
   const hatched = { ...dex.hatched }
-  const claims = { ...dex.claims }
+  const holds = { ...dex.holds }
   let pending = [...dex.pending]
-  let daycare = [...dex.daycare]
+  // 날짜가 바뀌면 키우미집에 남은 알은 버리고 그날 알로 새로 채운다
+  let daycare = today === dex.day ? [...dex.daycare] : freshEggs(today)
   const box = [...dex.box]
   const done = new Set(dex.done)
   const sent: Sent = { ...dex.sent }
@@ -230,18 +247,15 @@ export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[],
   const born: DexEgg[] = []
   const boxed: DexEgg[] = []
   const left: DexEgg[] = []
-  const claimed: DexEgg[] = []
-  const eggOf = (session: SessionStatus): DexEgg => {
-    const key = eggKeyOf(sent, session.id)
-    return {
-      key,
-      species: claims[session.id] ?? speciesOf(key),
-      root: session.root,
-      branch: session.branch,
-      label: labelOf(session),
-      at: now,
-    }
-  }
+  const given: DexEgg[] = []
+  const eggOf = (session: SessionStatus, egg: HeldEgg): DexEgg => ({
+    key: egg.key,
+    species: egg.species,
+    root: session.root,
+    branch: session.branch,
+    label: labelOf(session),
+    at: now,
+  })
   const hatch = (egg: DexEgg) => {
     if (hatched[egg.key] === undefined) {
       hatched[egg.key] = now
@@ -252,6 +266,10 @@ export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[],
     delete hatched[egg.key]
     box.unshift({ ...egg, at: now })
     boxed.push(egg)
+  }
+  const toDaycare = (egg: DexEgg) => {
+    daycare.unshift({ key: egg.key, species: egg.species })
+    left.push(egg)
   }
 
   // /clear 나 /resume 는 같은 창에서 새 id 로 이어지므로, 끝난 세션의 알은 이어진 세션이 물려받는다
@@ -264,22 +282,18 @@ export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[],
       continue
     }
     done.add(session.id)
-    const from = eggKeyOf(sent, session.id)
-    const last = sent[session.id]
-    if (last && !sent[heir.id]) {
-      sent[heir.id] = last
+    const egg = holds[session.id]
+    if (egg && !holds[heir.id]) {
+      holds[heir.id] = egg
     }
-    if (claims[heir.id] === undefined) {
-      claims[heir.id] = claims[session.id] ?? speciesOf(from)
+    if (sent[session.id] !== undefined && sent[heir.id] === undefined) {
+      sent[heir.id] = sent[session.id]!
     }
-    const to = eggKeyOf(sent, heir.id)
-    if (hatched[from] !== undefined && hatched[to] === undefined) {
-      hatched[to] = hatched[from]!
-    }
-    delete hatched[from]
-    delete claims[session.id]
+    delete holds[session.id]
   }
 
+  // 알이 없는 진행 중인 세션. 아래에서 키우미집의 알을 나눠 준다
+  const empty: SessionStatus[] = []
   for (const session of sessions) {
     if (!hasEgg(session)) {
       if (!isOpenSession(session, now)) {
@@ -287,35 +301,31 @@ export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[],
       }
       continue
     }
-    const mrState = mrStateOf(sent, session)
     if (isOpenSession(session, now)) {
-      // 잠자기에서 한 시간 넘게 지나 닫힌 것으로 보낸 세션이 돌아오면 자기 알을 되찾는다
+      // 잠자기에서 한 시간 넘게 지나 닫힌 것으로 보낸 세션이 돌아오면, 아직 아무도 안 받아 간 자기 알만 되찾는다
       if (done.has(session.id)) {
-        const key = eggKeyOf(sent, session.id)
         done.delete(session.id)
-        daycare = daycare.filter(egg => egg.key !== key)
-        pending = pending.filter(egg => egg.key !== key)
-      }
-      // 같은 브랜치로 다시 연 세션은 키우미집에 맡긴 알을 데려간다
-      const branch = session.branch
-      if (claims[session.id] === undefined && branch && !isLongLivedBranch(branch, 'main')) {
-        const index = daycare.findIndex(egg => egg.root === session.root && egg.branch === branch)
-        const egg = daycare[index]
-        if (egg) {
-          claims[session.id] = egg.species
-          daycare = daycare.filter((_, i) => i !== index)
-          claimed.push(egg)
+        const key = holds[session.id]?.key
+        if (daycare.some(egg => egg.key === key) || pending.some(egg => egg.key === key)) {
+          daycare = daycare.filter(egg => egg.key !== key)
+          pending = pending.filter(egg => egg.key !== key)
+        } else {
+          delete holds[session.id]
         }
       }
-      if (mrState === 'merged') {
-        const egg = eggOf(session)
+      const mine = holds[session.id]
+      if (mine && mrStateOf(sent, session) === 'merged') {
+        const egg = eggOf(session, mine)
         hatch(egg)
-        // 박스로 보내면 그 세션에는 새 알이 생긴다
+        // 박스로 보내면 빈 세션이 된다. 같은 브랜치의 머지로 다음 알이 깨지지 않게 브랜치를 기억한다
         if (asked.has(egg.key)) {
           toBox(egg)
-          sent[session.id] = { count: (sent[session.id]?.count ?? 0) + 1, branch: session.branch }
-          delete claims[session.id]
+          delete holds[session.id]
+          sent[session.id] = session.branch
         }
+      }
+      if (!holds[session.id] && livenessOf(session, now) === 'working') {
+        empty.push(session)
       }
       continue
     }
@@ -328,14 +338,33 @@ export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[],
       continue
     }
     done.add(session.id)
-    const egg = eggOf(session)
-    delete claims[session.id]
+    // 든 알은 holds 에 남겨 둬 잠자기에서 돌아오면 되찾게 한다
+    const mine = holds[session.id]
+    if (!mine) {
+      continue
+    }
+    const egg = eggOf(session, mine)
+    const mrState = mrStateOf(sent, session)
     if (mrState === 'merged' || mrState === 'opened') {
       pending.push({ ...egg, mrState })
     } else {
-      daycare.unshift(egg)
-      left.push(egg)
+      toDaycare(egg)
     }
+  }
+
+  // 먼저 일을 시작한 세션부터 키우미집 앞의 알을 하나씩 받는다
+  empty.sort((a, b) => (a.workingSince ?? a.updatedAt) - (b.workingSince ?? b.updatedAt) || (a.id < b.id ? -1 : 1))
+  for (const session of empty) {
+    const egg = daycare.shift()
+    if (!egg) {
+      break
+    }
+    holds[session.id] = egg
+    // 이미 머지된 브랜치에서 받은 알은 그 머지로 깨지지 않는다
+    if (session.mrState === 'merged') {
+      sent[session.id] = session.branch
+    }
+    given.push(eggOf(session, egg))
   }
 
   // 머지된 알은 부화해 잠깐 뛰다가 박스로 간다. 머지 없이 닫힌 MR 의 알은 키우미집으로 간다
@@ -351,8 +380,7 @@ export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[],
     }
     if (egg.mrState !== 'opened') {
       const { mrState: _, ...entry } = egg
-      daycare.unshift(entry)
-      left.push(entry)
+      toDaycare(entry)
       return false
     }
     return true
@@ -360,16 +388,18 @@ export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[],
 
   // 상태 파일이 지워진 세션은 다시 볼 일이 없으니 정리한 기록에서도 뺀다
   const known = new Set(sessions.map(session => session.id))
+  const ofKnown = <T>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([id]) => known.has(id)))
   const next: Pokedex = {
+    day: today,
     hatched,
     pending,
     daycare: daycare.slice(0, DAYCARE_MAX),
     box,
-    claims,
+    holds: ofKnown(holds),
     done: [...done].filter(id => known.has(id)).slice(-DONE_MAX),
-    sent: Object.fromEntries(Object.entries(sent).filter(([id]) => known.has(id))),
+    sent: ofKnown(sent),
   }
-  return { dex: next, born, boxed, left, claimed }
+  return { dex: next, born, boxed, left, given }
 }
 
 // 기다리는 알의 MR 상태를 바꾼다. 기록을 쓰는 세션이 MR 을 다시 조회한 뒤 부른다
@@ -385,13 +415,15 @@ export function eggsOf(sessions: readonly SessionStatus[], dex: Pokedex, now: nu
     .filter(session => isOpenSession(session, now) && hasEgg(session))
     .sort((a, b) => (a.id < b.id ? -1 : 1))
     .map(session => {
-      const key = eggKeyOf(dex.sent, session.id)
-      const stage = stageOf(mrStateOf(dex.sent, session))
+      // 알을 아직 안 받은 세션은 세션 id 로 된 알로 둔다
+      const mine = dex.holds[session.id]
+      const key = mine?.key ?? session.id
+      const stage = mine ? stageOf(mrStateOf(dex.sent, session)) : 'egg'
       const isWorking = livenessOf(session, now) === 'working'
       return {
         key,
         label: labelOf(session),
-        species: speciesFor(dex, session.id),
+        species: mine?.species ?? 0,
         stage,
         isShaking: stage !== 'hatched' && isWorking,
         activity: session.attention ? ('mine' as const) : isWorking ? ('working' as const) : null,
@@ -630,7 +662,7 @@ function boxOnPage(input: NestInput, width: number): BoxEntry[] {
 // 키우미집은 머리글 한 줄과 작은 알 한 줄. 맡긴 알이 없으면 그리지 않는다
 const DAYCARE_ROWS = 1 + 4
 
-function drawDaycare(canvas: Canvas, eggs: DexEgg[], frame: number) {
+function drawDaycare(canvas: Canvas, eggs: HeldEgg[], frame: number) {
   for (let y = 0; y < canvas.height; y++) {
     for (let x = 0; x < canvas.width; x++) {
       put(canvas, x, y, (x + (y >> 1)) % 4 === 0 ? C.daycareGroundAlt : C.daycareGround)

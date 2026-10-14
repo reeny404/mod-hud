@@ -662,8 +662,8 @@ async function keepPokedex($: EngineInterface, sessions: SessionStatus[], now: n
     for (const egg of advanced.left) {
       $.ui.toast(`키우미집에 ${egg.label} 알을 맡겼다`)
     }
-    for (const egg of advanced.claimed) {
-      $.ui.toast(`키우미집에서 ${egg.label} 알을 데려왔다`)
+    for (const egg of advanced.given) {
+      $.ui.toast(`키우미집에서 ${egg.label} 알을 받았다`)
     }
   }
   await update($, pokedex, () => dex)

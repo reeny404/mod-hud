@@ -136,28 +136,33 @@ export type InboxCache = {
 
 export type Inbox = { items: InboxItem[]; fetchedAt: number | null; isOk: boolean }
 
-// 세션 하나의 포켓몬 알. key 는 세션 id, species 는 1세대 도감 번호
+// 세션 정보를 붙인 포켓몬 알. key 는 알 이름, species 는 1세대 도감 번호
 export type DexEgg = { key: string; species: number; root: string; branch: string | null; label: string; at: number }
+
+// 키우미집에 있거나 세션이 든 알
+export type HeldEgg = { key: string; species: number }
 
 // 박스로 간 포켓몬
 export type BoxEntry = DexEgg
 
 // 모든 저장소와 세션이 같이 쓰는 ~/.claude/mod-hud-pokedex.json. 살아 있는 세션 중 id 가 가장 작은 세션만 쓴다
 export type Pokedex = {
-  // 세션 id 와 그 세션의 MR 이 처음 머지된 걸 본 시각
+  // 마지막으로 키우미집을 채운 로컬 날짜 YYYY-MM-DD. 빈 문자열이면 아직 안 채웠다
+  day: string
+  // 알 key 와 그 알의 MR 이 처음 머지된 걸 본 시각
   hatched: Record<string, number>
   // 세션은 닫혔지만 MR 이 열려 있어 머지를 기다리는 알
   pending: Array<DexEgg & { mrState: string }>
-  // MR 없이 닫힌 세션의 알. 같은 브랜치로 세션을 다시 열면 돌아간다
-  daycare: DexEgg[]
+  // 진행 중인 세션이 받아 갈 알. 매일 새로 채우고, MR 없이 닫힌 세션의 알도 돌아온다
+  daycare: HeldEgg[]
   // 최근에 잡은 것이 앞
   box: BoxEntry[]
-  // 키우미집에서 데려간 알. 세션 id 와 종
-  claims: Record<string, number>
+  // 세션 id 와 그 세션이 든 알. 세션이 닫혀도 남겨 두고 잠자기에서 돌아올 때 되찾는 데 쓴다
+  holds: Record<string, HeldEgg>
   // 이미 정리한 닫힌 세션 id
   done: string[]
-  // 세션이 열린 채 박스로 보내기를 누른 횟수와 그때의 브랜치. 보낸 뒤 그 세션에는 새 알이 생긴다
-  sent: Record<string, { count: number; branch: string | null }>
+  // 세션 id 와 머지돼도 알이 깨지지 않을 브랜치. 박스로 보낸 브랜치나 알을 받을 때 이미 머지된 브랜치다
+  sent: Record<string, string | null>
 }
 
 // 패널에 그릴 알 하나
