@@ -26,9 +26,18 @@ function nodes(tree: unknown, type: string, props: Record<string, unknown> = {})
   return found
 }
 
+// 요소 안의 글자를 모두 이어 붙인다
+function textOf(node: unknown): string {
+  if (typeof node === 'string' || typeof node === 'number') {
+    return String(node)
+  }
+  const one = node as Node | null
+  return (one?.children ?? []).map(textOf).join('')
+}
+
 const entry = (key: string, species: number, at: number): BoxEntry => ({ key, species, root: '/p/a', branch: null, label: key, at })
 
-test('옆에 붙은 패널은 PC BOX 머리줄에 앞장선 포켓몬과 경험치를 보이고 칸마다 그림을 그린다', async ($, on) => {
+test('옆에 붙은 패널은 DAY CARE 머리줄에 맡긴 포켓몬과 경험치를 보이고 PC BOX 를 칸마다 그린다', async ($, on) => {
   mock.clock(on, { now: NOW })
   const dex: Pokedex = { ...emptyPokedex(), box: [entry('a', 19, 1), entry('b', 6, 2), entry('c', 16, 3)], lead: 'a', xp: 0 }
   on('env.get', () => ({ value: '/home/test' }))
@@ -59,11 +68,16 @@ test('옆에 붙은 패널은 PC BOX 머리줄에 앞장선 포켓몬과 경험�
   const props = { placement: 'dock', bodyColumns: 60, scroll: { bodyRows: 60 } }
   const pane = await $.ui.mount({ plugin: 'mod-hud', surface: 'terminal', component: 'Pane', requestId: 'mod-hud', props } as never)
   expect(await pane.find({ type: 'Text', text: /PC BOX/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /★ Rattata ░░░░░ 3h0m/ })).toBeDefined()
+  // 키우미집에 맡겨 키우는 포켓몬과 경험치는 DAY CARE 머리줄에 보이고 PC BOX 머리줄에는 없다
+  const header = (key: string) => nodes(tree0(), 'Button', { key }).map(textOf).join('')
+  let drawnNow = await pane.drawn()
+  const tree0 = () => drawnNow
+  expect(header('daycare-toggle')).toContain('★ Rattata ░░░░░ 3h0m')
+  expect(header('box-toggle')).not.toContain('Rattata')
   // 폭 60 은 한 줄에 세 칸이고, 빈 칸도 벽으로 그린다
   expect(nodes(await pane.drawn(), 'Raster', { key: 'tile-2' }).length).toBe(1)
   expect(nodes(await pane.drawn(), 'Raster', { key: 'tile-3' }).length).toBe(0)
-  // 앞장은 마우스 카드의 Set as lead 로만 고르고, 박스 아래 앞장 버튼은 없다
+  // 키우미집에 맡길 포켓몬은 마우스 카드의 Leave at DAY CARE 로만 고르고, 박스 아래 앞장 버튼은 없다
   expect(nodes(await pane.drawn(), 'Button', { label: 'Lead ▶' }).length).toBe(0)
   expect(nodes(await pane.drawn(), 'Button', { label: '◀ Lead' }).length).toBe(0)
   // 칸마다 마우스를 올리면 뜨는 카드가 있다. 진화할 수 있고 앞장이 아닌 포켓몬에만 앞장세우기 버튼이 있다
@@ -71,8 +85,8 @@ test('옆에 붙은 패널은 PC BOX 머리줄에 앞장선 포켓몬과 경험�
   expect(await pane.find({ type: 'Text', text: /→/ })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /Raticate|Pidgeotto/ })).toBeUndefined()
   const tree = await pane.drawn()
-  expect(nodes(tree, 'Button', { key: 'lead-c' }).length).toBe(1)
-  // Set as lead 버튼도 카드 가운데에 놓는다
+  expect(nodes(tree, 'Button', { key: 'lead-c', label: 'Leave at DAY CARE' }).length).toBe(1)
+  // Leave at DAY CARE 버튼도 카드 가운데에 놓는다
   const centered = nodes(tree, 'Box', { justifyContent: 'center', width: '100%' })
   expect(centered.some(box => nodes(box, 'Button', { key: 'lead-c' }).length === 1)).toBe(true)
   expect(nodes(tree, 'Button', { key: 'lead-a' }).length).toBe(0)
@@ -86,13 +100,14 @@ test('옆에 붙은 패널은 PC BOX 머리줄에 앞장선 포켓몬과 경험�
   expect(nodes(await pane.drawn(), 'Raster', { key: 'daycare', rows: 6 }).length).toBe(1)
   await pane.press({ key: 'daycare-toggle' })
   expect(nodes(await pane.drawn(), 'Raster', { key: 'daycare' }).length).toBe(0)
-  expect(await pane.find({ type: 'Text', text: /DAY CARE/ })).toBeDefined()
+  // 접어도 머리줄의 남은 알 수와 맡긴 포켓몬의 경험치는 남는다
+  drawnNow = await pane.drawn()
+  expect(header('daycare-toggle')).toContain('★ Rattata ░░░░░ 3h0m')
   await pane.press({ key: 'daycare-toggle' })
   expect(nodes(await pane.drawn(), 'Raster', { key: 'daycare' }).length).toBe(1)
-  // PC BOX 머리줄을 누르면 박스를 접고 머리줄의 앞장 정보만 남긴다. 다시 누르면 편다
+  // PC BOX 머리줄을 누르면 박스를 접는다. 다시 누르면 편다
   await pane.press({ key: 'box-toggle' })
   expect(nodes(await pane.drawn(), 'Raster', { key: 'tile-0' }).length).toBe(0)
-  expect(await pane.find({ type: 'Text', text: /★ Rattata ░░░░░ 3h0m/ })).toBeDefined()
   await pane.press({ key: 'box-toggle' })
   expect(nodes(await pane.drawn(), 'Raster', { key: 'tile-0' }).length).toBe(1)
   await pane.unmount()

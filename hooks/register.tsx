@@ -884,11 +884,11 @@ let evolvingSeen = 0
 let evolvingSeenAt = 0
 // 이보다 오래된 진화는 처음 봐도 깜빡이지 않는다. 다른 세션이 기록을 읽는 간격보다 넉넉하다
 const EVOLVING_FRESH_MS = 60 * 1000
-// PC BOX 머리줄. 한국어 대신 영어 이름이지만 ★ 와 막대는 Raster 가 못 그려 Text 로 그린다
+// PC BOX 와 DAY CARE 머리줄의 글자. 박스 수와, 키우미집에 맡겨 키우는 포켓몬의 경험치. ★ 와 막대는 Raster 가 못 그려 Text 로 그린다
 let boxHeader: { count: number; lead: string | null } = { count: 0, lead: null }
-// PC BOX 를 접었는지. 접으면 머리줄의 앞장 정보만 보인다
+// PC BOX 를 접었는지. 접으면 머리줄만 보인다
 let boxCollapsed = false
-// 키우미집을 접었는지. 접으면 머리줄의 남은 알 수만 보인다
+// 키우미집을 접었는지. 접으면 머리줄의 맡긴 포켓몬 경험치와 남은 알 수만 보인다
 let daycareCollapsed = false
 // 박스 칸에 마우스를 올리면 뜨는 카드의 글자. 칸 key 로 찾는다
 let boxCards = new Map<string, { name: string; caught: string; canLead: boolean }>()
@@ -1648,6 +1648,8 @@ export const register: Register = (on, options) => {
                 <Text bold color="#ffffff">
                   {daycareCollapsed ? '▸' : '▾'} DAY CARE
                 </Text>
+                {/* 키우미집에 맡긴 포켓몬은 일한 만큼 경험치를 얻는다. 원작의 키우미집처럼 */}
+                {boxHeader.lead && <Text color="#ffe080">{`  ${boxHeader.lead}`}</Text>}
               </Button>
               <Box flexGrow={1} />
               <Text bold color="#ffe080">
@@ -1678,7 +1680,6 @@ export const register: Register = (on, options) => {
                     boxPages(nestScene.input, nestScene.columns) > 1 &&
                     `  ${boxPageOf(nestScene.input, nestScene.columns) + 1}/${boxPages(nestScene.input, nestScene.columns)}`}
                 </Text>
-                {boxHeader.lead && <Text color="#ffe080">{`  ${boxHeader.lead}`}</Text>}
               </Button>
               <Box flexGrow={1} />
               <Text bold color="#ffe080">
@@ -1717,7 +1718,7 @@ export const register: Register = (on, options) => {
                         {entry.key === nestScene!.input.lead && <Text color="#ffe080">{boxHeader.lead}</Text>}
                         {boxCards.get(entry.key)!.canLead && (
                           <Box justifyContent="center" width="100%">
-                            <Button key={`lead-${entry.key}`} label="Set as lead" onPress={() => pickLead($, entry.key)} />
+                            <Button key={`lead-${entry.key}`} label="Leave at DAY CARE" onPress={() => pickLead($, entry.key)} />
                           </Box>
                         )}
                       </Box>
