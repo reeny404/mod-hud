@@ -41,6 +41,8 @@ export type SessionStatus = TreeSession & {
   waitingOnTasks?: boolean
   // 이 세션 브랜치의 MR 상태(opened, merged, closed). 포켓몬 알이 금 가고 부화하는 기준이다
   mrState?: string | null
+  // mrState 를 조회한 브랜치. 지금 브랜치와 다르면 mrState 는 모르는 것으로 친다. 없으면 이 필드가 생기기 전의 상태 파일이다
+  mrBranch?: string | null
   // /mod-hud dashboard 로 대시보드라고 표시한 세션. 포켓몬 알이 없다
   isDashboard?: boolean
   // iTerm2 Claude Code 연동의 Code Review 탭이 띄운 리뷰 세션. 목록과 포켓몬 알에서 뺀다
@@ -105,6 +107,8 @@ export type IssuesCache = {
   rows: Row[]
   // 살아 있는 세션이 일한 브랜치의 MR. 세션 줄의 MR 링크와 머지 여부에 쓴다
   branchMrs: Record<string, Mr>
+  // 이번 조회에서 MR 을 찾아본 브랜치. branchMrs 에 없으면 MR 이 없는 것이다. 여기 없는 브랜치는 아직 모른다
+  checked: string[]
   // 최근 정리 기록
   log: string[]
   lease: { by: string; at: number } | null

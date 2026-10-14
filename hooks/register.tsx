@@ -170,6 +170,7 @@ async function writeStatus($: EngineInterface, patch: Partial<SessionStatus>) {
       isDashboard: prev?.isDashboard,
       isCodeReview: prev?.isCodeReview,
       mrState: prev?.mrState,
+      mrBranch: prev?.mrBranch,
       ...mine,
       ...patch,
       id,
@@ -179,6 +180,8 @@ async function writeStatus($: EngineInterface, patch: Partial<SessionStatus>) {
       branch,
       updatedAt,
       waitingSince,
+      // 브랜치가 없으면 MR 도 없다. 저장소 밖 세션은 MR 을 조회하지 않으므로 여기서 적어 둔다
+      ...(branch === null ? { mrState: null, mrBranch: null } : {}),
     }
     await $.fs.write(`${base}/${id}.json`, JSON.stringify(mine))
   } catch {
@@ -491,16 +494,19 @@ async function collectIssues($: EngineInterface, { root, api, base }: RepoInfo, 
   // worktree 가 아닌 브랜치에서 일한 세션도 MR 을 찾는다. 세션 줄의 MR 링크와 머지 여부에 쓴다
   const known = new Map(next.map(row => [row.branch, row.mr]))
   const found: Record<string, Mr> = {}
+  // MR 을 찾아본 브랜치. 세션은 여기 있는 브랜치의 MR 상태만 상태 파일에 적는다
+  const checked = new Set<string>()
   for (const branch of new Set(allSessions.filter(s => s.state !== 'ended').map(s => s.branch))) {
     if (!branch || isLongLivedBranch(branch, base)) {
       continue
     }
     const mr = known.has(branch) ? known.get(branch) : await findMr(branch)
+    checked.add(branch)
     if (mr) {
       found[branch] = mr
     }
   }
-  return { rows: next, branchMrs: found, log }
+  return { rows: next, branchMrs: found, checked: [...checked], log }
 }
 
 async function readIssuesCache($: EngineInterface, path: string): Promise<IssuesCache> {
@@ -526,8 +532,11 @@ async function refreshIssues($: EngineInterface, isForced: boolean) {
     const path = `${home}/.claude/${issuesFileOf(repo.root)}`
     const me = await $.session.id()
     let cache = await readIssuesCache($, path)
+    // 이 세션 브랜치의 MR 을 아직 찾아보지 않았으면 주기를 기다리지 않고 조회한다. 그 전까지 이 세션은 알을 받지 않는다
+    const isUnchecked = (branch: string | null | undefined) =>
+      !!branch && !isLongLivedBranch(branch, repo.base) && !cache.checked.includes(branch)
 
-    if (shouldFetch(cache, await $.clock.now(), me, isForced, ISSUES_TTL_MS)) {
+    if (shouldFetch(cache, await $.clock.now(), me, isForced || isUnchecked(mine?.branch), ISSUES_TTL_MS)) {
       // 파일에 이 세션이 맡는다고 써 두고, 잠깐 뒤 다시 읽어 그대로일 때만 부른다. 나중에 쓴 세션이 맡는다
       await $.fs.write(path, JSON.stringify({ ...cache, lease: { by: me, at: await $.clock.now() } }))
       await $.clock.sleep(LEASE_SETTLE_MS)
@@ -551,10 +560,14 @@ async function refreshIssues($: EngineInterface, isForced: boolean) {
     await update($, rows, () => cache.rows)
     await update($, branchMrs, () => cache.branchMrs)
     await update($, issuesMeta, () => ({ refreshedAt: cache.fetchedAt, isRefreshing: false, log: cache.log }))
-    // 포켓몬 알이 금 가고 부화하는 기준이라, 이 세션 브랜치의 MR 상태를 상태 파일에 적어 다른 세션도 보게 한다
-    const mrState = mine?.branch ? (cache.branchMrs[mine.branch]?.state ?? null) : null
-    if (mine && (mine.mrState ?? null) !== mrState) {
-      await writeStatus($, { mrState })
+    // 포켓몬 알이 금 가고 부화하는 기준이라, 이 세션 브랜치의 MR 상태를 조회한 브랜치와 함께 상태 파일에 적어 다른 세션도 보게 한다
+    // 아직 찾아보지 않은 브랜치는 적지 않는다. 다른 브랜치를 보고 적은 상태는 모르는 것으로 친다
+    const branch = mine?.branch ?? null
+    if (mine && !isUnchecked(branch)) {
+      const mrState = branch ? (cache.branchMrs[branch]?.state ?? null) : null
+      if ((mine.mrState ?? null) !== mrState || mine.mrBranch !== branch) {
+        await writeStatus($, { mrState, mrBranch: branch })
+      }
     }
   } catch {
     // 이슈를 못 읽어도 다른 패널 동작은 막지 않는다

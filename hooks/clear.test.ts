@@ -45,4 +45,8 @@ test('/clear 뒤 새 세션은 이전 세션의 ended 와 프롬프트를 물려
   const next = written.get('/home/test/.claude/mod-sessions/new.json')
   expect(next?.state).toBe('waiting')
   expect(next?.prompt).toBeNull()
+  // 브랜치가 없는 세션은 MR 이 없다고 바로 적어 알을 받을 수 있다
+  expect(next?.branch).toBeNull()
+  expect(next?.mrBranch).toBeNull()
+  expect(next?.mrState).toBeNull()
 })

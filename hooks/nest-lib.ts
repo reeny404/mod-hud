@@ -225,9 +225,21 @@ export function labelOf(session: Pick<SessionStatus, 'branch' | 'project'>): str
 
 type Sent = Pokedex['sent']
 
+// mrState 를 지금 브랜치에서 조회했는지. mrBranch 가 없는 옛 상태 파일은 아직 모르는 것으로 친다
+function knowsMr(session: SessionStatus): boolean {
+  return session.mrBranch !== undefined && session.mrBranch === session.branch
+}
+
 // 지금 알에 쓰는 MR 상태. 박스로 보냈거나 알을 받을 때 이미 머지된 브랜치에 머무는 동안은 머지되지 않은 것으로 친다
+// 다른 브랜치를 보고 적은 MR 상태는 모르는 것으로 친다. mrBranch 가 없는 옛 상태 파일은 예전처럼 믿는다
 function mrStateOf(sent: Sent, session: SessionStatus): string | null {
-  return sent[session.id] !== undefined && sent[session.id] === session.branch ? null : (session.mrState ?? null)
+  if (sent[session.id] !== undefined && sent[session.id] === session.branch) {
+    return null
+  }
+  if (session.mrBranch !== undefined && session.mrBranch !== session.branch) {
+    return null
+  }
+  return session.mrState ?? null
 }
 
 // 세션 상태와 기록을 맞춘다. 기록을 쓰는 세션이 세션 목록을 읽을 때마다 부른다
@@ -267,9 +279,21 @@ export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[],
     box.unshift({ ...egg, at: now })
     boxed.push(egg)
   }
+  // 키우미집으로 돌아간 알은 다음에 받은 세션에서 새로 부화한다
   const toDaycare = (egg: DexEgg) => {
+    delete hatched[egg.key]
     daycare.unshift({ key: egg.key, species: egg.species })
     left.push(egg)
+  }
+  // 세션이 놓은 알. 머지됐거나 MR 이 열려 있으면 머지를 기다리고, 아니면 키우미집으로 간다
+  const release = (session: SessionStatus, held: HeldEgg) => {
+    const egg = eggOf(session, held)
+    const mrState = mrStateOf(sent, session)
+    if (mrState === 'merged' || mrState === 'opened') {
+      pending.push({ ...egg, mrState })
+    } else {
+      toDaycare(egg)
+    }
   }
 
   // /clear 나 /resume 는 같은 창에서 새 id 로 이어지므로, 끝난 세션의 알은 이어진 세션이 물려받는다
@@ -283,9 +307,9 @@ export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[],
     }
     done.add(session.id)
     const egg = holds[session.id]
-    // 이어 받을 세션이 이미 알을 들고 있으면 끝난 세션의 알은 키우미집으로 돌려보낸다
+    // 이어 받을 세션이 이미 알을 들고 있으면 끝난 세션의 알은 닫힌 세션의 알처럼 놓는다
     if (egg && holds[heir.id]) {
-      daycare.unshift(egg)
+      release(session, egg)
     } else if (egg) {
       holds[heir.id] = egg
     }
@@ -299,6 +323,12 @@ export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[],
   const empty: SessionStatus[] = []
   for (const session of sessions) {
     if (!hasEgg(session)) {
+      // 알을 받은 뒤 대시보드로 표시한 세션은 든 알을 놓는다
+      const mine = holds[session.id]
+      if (mine) {
+        release(session, mine)
+        delete holds[session.id]
+      }
       if (!isOpenSession(session, now)) {
         done.add(session.id)
       }
@@ -346,18 +376,13 @@ export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[],
     if (!mine) {
       continue
     }
-    const egg = eggOf(session, mine)
-    const mrState = mrStateOf(sent, session)
-    if (mrState === 'merged' || mrState === 'opened') {
-      pending.push({ ...egg, mrState })
-    } else {
-      toDaycare(egg)
-    }
+    release(session, mine)
   }
 
   // 먼저 일을 시작한 세션부터 키우미집 앞의 알을 하나씩 받는다
+  // 지금 브랜치의 MR 상태를 아직 모르는 세션은 이번에는 건너뛴다. 이미 머지된 브랜치에서 받은 알이 그 머지로 깨지지 않게 한다
   empty.sort((a, b) => (a.workingSince ?? a.updatedAt) - (b.workingSince ?? b.updatedAt) || (a.id < b.id ? -1 : 1))
-  for (const session of empty) {
+  for (const session of empty.filter(knowsMr)) {
     const egg = daycare.shift()
     if (!egg) {
       break
@@ -398,13 +423,17 @@ export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[],
   // 상태 파일이 지워진 세션은 다시 볼 일이 없으니 정리한 기록에서도 뺀다
   const known = new Set(sessions.map(session => session.id))
   const ofKnown = <T>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([id]) => known.has(id)))
+  const nextDaycare = daycare.slice(0, DAYCARE_MAX)
+  const nextHolds = ofKnown(holds)
+  // 들거나 맡기거나 기다리는 알이 아닌 알의 부화 기록은 지운다
+  const kept = new Set([...Object.values(nextHolds), ...nextDaycare, ...pending].map(egg => egg.key))
   const next: Pokedex = {
     day: today,
-    hatched,
+    hatched: Object.fromEntries(Object.entries(hatched).filter(([key]) => kept.has(key))),
     pending,
-    daycare: daycare.slice(0, DAYCARE_MAX),
+    daycare: nextDaycare,
     box,
-    holds: ofKnown(holds),
+    holds: nextHolds,
     done: [...done].filter(id => known.has(id)).slice(-DONE_MAX),
     sent: ofKnown(sent),
   }

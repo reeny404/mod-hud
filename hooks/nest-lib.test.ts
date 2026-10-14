@@ -36,6 +36,8 @@ const session = (id: string, patch: Partial<SessionStatus> = {}): SessionStatus 
   prompt: '일해줘',
   todos: null,
   ...patch,
+  // MR 상태는 따로 적지 않으면 지금 브랜치를 보고 적은 것이다
+  mrBranch: 'mrBranch' in patch ? patch.mrBranch : (patch.branch === undefined ? `feat/${id}` : patch.branch),
 })
 
 const dexEgg = (key: string, patch: Partial<DexEgg> = {}): DexEgg => ({
@@ -344,6 +346,82 @@ test('/clear 로 이어진 세션이 이미 알을 들고 있으면 끝난 세�
   const after = advancePokedex(dexOf({ holds: { old: held('egg-old'), new: held('egg-new') } }), sessions, NOW)
   expect(after.dex.holds).toEqual({ new: held('egg-new') })
   expect(after.dex.daycare).toEqual([held('egg-old')])
+  expect(after.left.map(egg => egg.key)).toEqual(['egg-old'])
+})
+
+test('/clear 로 이어진 세션이 이미 알을 들고 있어도 끝난 세션의 부화한 포켓몬은 박스로 간다', () => {
+  const live = advancePokedex(
+    dexOf({ holds: { old: held('egg-old'), new: held('egg-new') } }),
+    [session('old', { mrState: 'merged' }), session('new', { predecessor: 'old' })],
+    NOW,
+  ).dex
+  expect(live.hatched['egg-old']).toBe(NOW)
+  const sessions = [
+    session('old', { state: 'ended', endReason: 'clear', mrState: 'merged' }),
+    session('new', { predecessor: 'old' }),
+  ]
+  const after = advancePokedex(live, sessions, NOW + 1)
+  expect(after.dex.daycare).toEqual([])
+  expect(after.dex.pending.map(egg => [egg.key, egg.mrState])).toEqual([['egg-old', 'merged']])
+  const later = advancePokedex(after.dex, sessions, NOW + CELEBRATE_MS)
+  expect(later.dex.box.map(egg => egg.key)).toEqual(['egg-old'])
+})
+
+test('알을 받은 뒤 대시보드로 표시한 세션은 알을 키우미집에 돌려준다', () => {
+  const after = advancePokedex(dexOf({ holds: { a: held('egg-a') } }), [session('a', { isDashboard: true })], NOW)
+  expect(after.dex.holds).toEqual({})
+  expect(after.dex.daycare).toEqual([held('egg-a')])
+  expect(after.left.map(egg => egg.key)).toEqual(['egg-a'])
+})
+
+test('부화했다가 키우미집에 돌아간 알은 다음 세션이 받아 부화하면 다시 탄생을 알린다', () => {
+  const live = advancePokedex(dexOf({ holds: { a: held('egg-a') } }), [session('a', { mrState: 'merged' })], NOW).dex
+  expect(live.hatched['egg-a']).toBe(NOW)
+  // 머지 없는 브랜치로 옮겨 닫으면 알은 키우미집으로 간다
+  const gone = advancePokedex(live, [session('a', { ...closed, branch: 'feat/other', mrState: null })], NOW + 1).dex
+  expect(gone.daycare).toEqual([held('egg-a')])
+  expect(gone.hatched).toEqual({})
+  const got = advancePokedex(gone, [session('b', { state: 'working' })], NOW + 2).dex
+  const born = advancePokedex(got, [session('b', { mrState: 'merged' })], NOW + 3)
+  expect(born.born.map(egg => egg.key)).toEqual(['egg-a'])
+  expect(born.dex.hatched['egg-a']).toBe(NOW + 3)
+})
+
+test('어디에도 없는 알의 부화 기록은 지운다', () => {
+  const after = advancePokedex(dexOf({ hatched: { lost: NOW } }), [], NOW)
+  expect(after.dex.hatched).toEqual({})
+})
+
+test('MR 상태가 지금 브랜치의 것인지 모르면 알을 주지 않고, 알게 되면 이미 머지된 브랜치의 알은 깨지지 않는다', () => {
+  const dex = dexOf({ daycare: [held('next')] })
+  // 이미 머지된 브랜치에서 새로 연 세션. MR 상태를 아직 조회하지 않았다
+  const unknown = advancePokedex(dex, [session('a', { state: 'working', branch: 'feat/done', mrBranch: undefined })], NOW)
+  expect(unknown.dex.holds).toEqual({})
+  expect(unknown.given).toEqual([])
+  // 다른 브랜치를 보고 적은 MR 상태도 모르는 것으로 친다
+  const stale = advancePokedex(dex, [session('a', { state: 'working', branch: 'feat/done', mrState: null, mrBranch: 'feat/old' })], NOW)
+  expect(stale.dex.holds).toEqual({})
+  const known = [session('a', { state: 'working', branch: 'feat/done', mrState: 'merged' })]
+  const got = advancePokedex(unknown.dex, known, NOW + 1)
+  expect(got.dex.holds).toEqual({ a: held('next') })
+  const later = advancePokedex(got.dex, known, NOW + 2)
+  expect(later.born).toEqual([])
+  expect(eggsOf(known, later.dex, NOW + 2)[0]!.stage).toBe('egg')
+})
+
+test('다른 브랜치를 보고 적은 머지는 지금 든 알을 깨지 않는다', () => {
+  const sessions = [session('a', { branch: 'feat/b', mrState: 'merged', mrBranch: 'feat/a' })]
+  const dex = dexOf({ holds: { a: held('egg-a') } })
+  expect(advancePokedex(dex, sessions, NOW).born).toEqual([])
+  expect(eggsOf(sessions, dex, NOW)[0]!.stage).toBe('egg')
+  // 닫혀도 머지된 것으로 치지 않는다
+  expect(advancePokedex(dex, sessions.map(one => ({ ...one, ...closed })), NOW).dex.daycare).toEqual([held('egg-a')])
+})
+
+test('브랜치를 적지 않은 옛 상태 파일의 MR 상태는 알을 깨는 데는 믿지만, 알을 주지는 않는다', () => {
+  const legacy = session('a', { state: 'working', mrState: 'merged', mrBranch: undefined })
+  expect(advancePokedex(dexOf({ holds: { a: held('egg-a') } }), [legacy], NOW).born.map(egg => egg.key)).toEqual(['egg-a'])
+  expect(advancePokedex(dexOf({ daycare: [held('next')] }), [legacy], NOW).dex.holds).toEqual({})
 })
 
 test('금 간 알과 부화한 알, 박스 이번 페이지의 포켓몬만 스프라이트를 불러온다', () => {
@@ -375,6 +453,22 @@ test('스프라이트를 불러오면 몬스터볼 대신 그 그림을 그린�
   const withDot = drawNest(input, 40, 0, NOW, dot)
   expect(withDot).not.toEqual(drawNest(input, 40, 0, NOW, () => undefined))
   expect(Array.from(withDot).includes(0x123456)).toBe(true)
+})
+
+test('빈 둥지는 둥지 바닥만 그리고 알은 그리지 않는다', () => {
+  const nest = { key: 'a', label: 'a', species: 0, isShaking: false, activity: null, hatchedAt: null }
+  const empty = { eggs: [{ ...nest, stage: 'empty' as const }], daycare: [], box: [], boxPage: 0 }
+  const egg = { ...empty, eggs: [{ ...nest, stage: 'egg' as const }] }
+  const none: SpriteLookup = () => undefined
+  const cells = drawNest(empty, 40, 1, NOW, none)
+  expect(cells.length).toBe(40 * nestRows(empty, 40) * 3)
+  expect(cells).not.toEqual(drawNest(egg, 40, 1, NOW, none))
+  // 흔들리는 세션이어도 빈 둥지는 그릴 알이 없어 프레임마다 그대로다
+  const shaking = { ...empty, eggs: [{ ...nest, stage: 'empty' as const, isShaking: true }] }
+  expect(drawNest(shaking, 40, 2, NOW, none)).toEqual(drawNest(shaking, 40, 1, NOW, none))
+  // 알 그림의 색은 빈 둥지에 없다
+  const seen = new Set(Array.from(cells))
+  expect(Array.from(drawNest(egg, 40, 1, NOW, none)).some(value => !seen.has(value))).toBe(true)
 })
 
 test('키우미집은 알이 0개여도 보인다', () => {

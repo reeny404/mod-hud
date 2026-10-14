@@ -173,7 +173,7 @@ export const readEnvValue = (text: string, name: string): string | null => {
 // 이슈 조회 주기. 세션이 몇 개든 이 주기에 한 번만 git 과 GitLab 을 부른다
 export const ISSUES_TTL_MS = 2 * 60 * 1000
 
-export const emptyIssuesCache = (): IssuesCache => ({ fetchedAt: null, rows: [], branchMrs: {}, log: [], lease: null })
+export const emptyIssuesCache = (): IssuesCache => ({ fetchedAt: null, rows: [], branchMrs: {}, checked: [], log: [], lease: null })
 
 // 깨졌거나 예전 모양인 파일은 빈 값으로 읽는다
 export const parseIssuesCache = (text: string): IssuesCache => {
@@ -186,6 +186,7 @@ export const parseIssuesCache = (text: string): IssuesCache => {
       fetchedAt: typeof raw.fetchedAt === 'number' ? raw.fetchedAt : null,
       rows: Array.isArray(raw.rows) ? raw.rows : [],
       branchMrs: raw.branchMrs && typeof raw.branchMrs === 'object' && !Array.isArray(raw.branchMrs) ? raw.branchMrs : {},
+      checked: Array.isArray(raw.checked) ? raw.checked.filter(branch => typeof branch === 'string') : [],
       log: Array.isArray(raw.log) ? raw.log.filter(line => typeof line === 'string') : [],
       lease:
         raw.lease && typeof raw.lease.by === 'string' && typeof raw.lease.at === 'number'

@@ -1,7 +1,7 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import type { IssuesCache, Row } from '../types'
+import type { IssuesCache, Row, SessionStatus } from '../types'
 import { issuesFileOf, ISSUES_TTL_MS } from './issues-lib'
 
 const NOW = Date.parse('2026-10-12T06:00:00.000Z')
@@ -22,11 +22,17 @@ const ROW: Row = {
 }
 
 // 파일은 메모리에 두고, git worktree list 를 몇 번 불렀는지 센다
-const setup = (on: On, files: Map<string, string>) => {
+// branch 를 주면 git 이 그 브랜치를 알려 주고, 상태 파일 폴더도 메모리의 파일로 읽는다
+const setup = (on: On, files: Map<string, string>, branch?: string) => {
   const calls = { worktreeList: 0 }
   on('env.get', () => ({ value: '/home/test' }))
-  on('fs.exists', () => ({ value: false }))
-  on('fs.list', () => ({ value: [] }))
+  // 상태 파일 폴더만 메모리의 파일로 읽는다
+  const STATUS = '/home/test/.claude/mod-sessions/'
+  const statusNames = () => [...files.keys()].filter(path => path.startsWith(STATUS)).map(path => path.slice(STATUS.length))
+  on('fs.exists', () => ({ value: branch !== undefined && statusNames().length > 0 }))
+  on('fs.list', () => ({
+    value: (branch === undefined ? [] : statusNames()).map(name => ({ name, kind: 'file', size: 1, mtimeMs: NOW, isLink: false })),
+  }) as never)
   on('fs.read', ($, e) => {
     const text = files.get((e as unknown as { path: string }).path)
     if (text === undefined) {
@@ -44,7 +50,8 @@ const setup = (on: On, files: Map<string, string>) => {
     if (argv[1] === 'worktree' && argv[2] === 'list') {
       calls.worktreeList += 1
     }
-    return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    const stdout = branch !== undefined && argv[1] === 'branch' && argv[2] === '--show-current' ? `${branch}\n` : ''
+    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('command.register', () => ({ value: { name: 'x' } }) as never)
   on('session.id', () => ({ value: 'self' }))
@@ -91,4 +98,23 @@ test('파일이 오래됐으면 한 번만 조회하고, 다른 세션이 맡고
   files.set(FILE, cache({ fetchedAt: NOW - ISSUES_TTL_MS, lease: { by: 'other', at: NOW + ISSUES_TTL_MS } }))
   await clock.advance(ISSUES_TTL_MS)
   expect(calls.worktreeList).toBe(1)
+})
+
+test('세션 브랜치의 MR 을 아직 찾아보지 않았으면 주기 전이라도 조회해, 찾아본 브랜치와 함께 MR 상태를 적는다', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  // 다른 세션이 1분 전에 조회했지만 이 세션의 새 브랜치는 찾아보지 않았다
+  const files = new Map([[FILE, cache({ fetchedAt: NOW - 60 * 1000, checked: ['feat/ABC-611-wind'] })]])
+  const calls = setup(on, files, 'feat/ABC-7-new')
+  const dir = '/home/test/.claude/mod-sessions'
+  // 이 브랜치의 MR 은 이미 머지됐다
+  on('http.fetch', () => ({ value: { ok: true, status: 200, text: JSON.stringify([{ iid: 7, state: 'merged', sha: 's', web_url: 'u' }]) } }) as never)
+  await $.session.start({ source: 'startup', cwd: '/r/my-app' } as never)
+  await clock.advance(1000)
+  expect(calls.worktreeList).toBe(1)
+  const written = JSON.parse(files.get(FILE) ?? '{}') as IssuesCache
+  expect(written.checked).toContain('feat/ABC-7-new')
+  const status = JSON.parse(files.get(`${dir}/self.json`) ?? '{}') as SessionStatus
+  expect(status.branch).toBe('feat/ABC-7-new')
+  expect(status.mrBranch).toBe('feat/ABC-7-new')
+  expect(status.mrState).toBe('merged')
 })
