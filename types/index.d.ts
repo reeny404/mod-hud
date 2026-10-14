@@ -170,7 +170,8 @@ export type NestEgg = {
   key: string
   label: string
   species: number
-  stage: 'egg' | 'cracked' | 'hatched'
+  // 알을 못 받은 세션은 empty, 빈 둥지만 보인다
+  stage: 'empty' | 'egg' | 'cracked' | 'hatched'
   isShaking: boolean
   // 세션이 나를 기다리면 mine, 일하는 중이면 working. 라벨 색을 패널의 내 차례, 진행 중과 같게 칠한다
   activity: 'mine' | 'working' | null

@@ -424,17 +424,17 @@ export function eggsOf(sessions: readonly SessionStatus[], dex: Pokedex, now: nu
     .filter(session => isOpenSession(session, now) && hasEgg(session))
     .sort((a, b) => (a.id < b.id ? -1 : 1))
     .map(session => {
-      // 알을 아직 안 받은 세션은 세션 id 로 된 알로 둔다
+      // 알을 아직 안 받은 세션은 세션 id 로 된 빈 둥지로 둔다
       const mine = dex.holds[session.id]
       const key = mine?.key ?? session.id
-      const stage = mine ? stageOf(mrStateOf(dex.sent, session)) : 'egg'
+      const stage = mine ? stageOf(mrStateOf(dex.sent, session)) : 'empty'
       const isWorking = livenessOf(session, now) === 'working'
       return {
         key,
         label: labelOf(session),
         species: mine?.species ?? 0,
         stage,
-        isShaking: stage !== 'hatched' && isWorking,
+        isShaking: (stage === 'egg' || stage === 'cracked') && isWorking,
         activity: session.attention ? ('mine' as const) : isWorking ? ('working' as const) : null,
         hatchedAt: dex.hatched[key] ?? null,
       }
@@ -453,7 +453,7 @@ export function eggsOf(sessions: readonly SessionStatus[], dex: Pokedex, now: nu
 
 // 그림에 쓸 스프라이트 번호. 금 간 알은 곧 나올 것이라 미리 불러 둔다
 export function speciesToLoad(input: NestInput, width: number): number[] {
-  const eggs = eggsOnScreen(input, width).filter(egg => egg.stage !== 'egg')
+  const eggs = eggsOnScreen(input, width).filter(egg => egg.stage !== 'egg' && egg.stage !== 'empty')
   const box = boxOnPage(input, width)
   return [...new Set([...eggs.map(egg => egg.species), ...box.map(entry => entry.species)])]
 }
@@ -527,6 +527,9 @@ function drawSlot(canvas: Canvas, slotX: number, slot: number, egg: Egg, frame: 
   const eggTop = floor - EGG_HEIGHT
   for (let dx = 1; dx < slot - 1; dx++) {
     put(canvas, slotX + dx, floor, dx % 2 === 0 ? C.nest : C.nestDark)
+  }
+  if (egg.stage === 'empty') {
+    return
   }
   if (egg.stage === 'hatched') {
     // 껍질 없이 포켓몬만 둥지 위에서 통통 튄다. 막 나왔을 때는 더 높이 뛰며 반짝인다
@@ -668,7 +671,7 @@ function boxOnPage(input: NestInput, width: number): BoxEntry[] {
   return input.box.slice(page * size, (page + 1) * size)
 }
 
-// 키우미집은 머리글 한 줄과 작은 알 한 줄. 맡긴 알이 없으면 그리지 않는다
+// 키우미집은 머리글 한 줄과 작은 알 한 줄. 알이 없어도 그린다
 const DAYCARE_ROWS = 1 + 4
 
 function drawDaycare(canvas: Canvas, eggs: HeldEgg[], frame: number) {
@@ -686,18 +689,18 @@ function drawDaycare(canvas: Canvas, eggs: HeldEgg[], frame: number) {
   })
 }
 
-// 알 줄, 키우미집, 박스를 그린다. 알이 없으면 알 줄은 빼고, 박스는 비어도 한 줄을 보인다
+// 알 줄, 키우미집, 박스를 그린다. 세션이 없으면 알 줄은 빼고, 키우미집은 알이 없어도 그리고, 박스는 비어도 한 줄을 보인다
 export function nestRows(input: NestInput, width: number): number {
   // 알 한 줄은 그림과 라벨 한 줄이고, 알이 있으면 그 아래 한 줄을 띄운다
   const layout = eggLayout(input.eggs, width)
   const eggs = layout.reduce((sum, row) => sum + row.rows + 1, 0) + (layout.length > 0 ? 1 : 0)
-  const daycare = input.daycare.length > 0 ? DAYCARE_ROWS + 1 : 0
+  const daycare = DAYCARE_ROWS + 1
   return eggs + daycare + 1 + boxRows(input, width) * TILE_ROWS
 }
 
 export function drawNest(input: NestInput, width: number, frame: number, now: number, lookup: SpriteLookup): Uint32Array {
   const out: number[] = []
-  const color = { egg: C.labelEgg, cracked: C.labelCracked, hatched: C.labelHatched }
+  const color = { empty: C.labelEgg, egg: C.labelEgg, cracked: C.labelCracked, hatched: C.labelHatched }
   for (const row of eggLayout(input.eggs, width)) {
     const canvas = canvasOf(width, row.rows * 2)
     const total = row.slots.reduce((sum, slot) => sum + slot, 0)
@@ -720,22 +723,20 @@ export function drawNest(input: NestInput, width: number, frame: number, now: nu
     textCells(width, [], CLEAR, out)
   }
 
-  if (input.daycare.length > 0) {
-    const count = `${input.daycare.length}`
-    textCells(
-      width,
-      [
-        { at: 1, text: 'DAY CARE', color: C.boxBarText },
-        { at: width - count.length - 1, text: count, color: C.boxCount },
-      ],
-      C.daycareBar,
-      out,
-    )
-    const ground = canvasOf(width, (DAYCARE_ROWS - 1) * 2)
-    drawDaycare(ground, input.daycare, frame)
-    pixelCells(ground, out)
-    textCells(width, [], CLEAR, out)
-  }
+  const daycareCount = `${input.daycare.length}`
+  textCells(
+    width,
+    [
+      { at: 1, text: 'DAY CARE', color: C.boxBarText },
+      { at: width - daycareCount.length - 1, text: daycareCount, color: C.boxCount },
+    ],
+    C.daycareBar,
+    out,
+  )
+  const ground = canvasOf(width, (DAYCARE_ROWS - 1) * 2)
+  drawDaycare(ground, input.daycare, frame)
+  pixelCells(ground, out)
+  textCells(width, [], CLEAR, out)
 
   const count = `${input.box.length}`
   const pages = boxPages(input, width)

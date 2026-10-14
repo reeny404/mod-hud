@@ -58,7 +58,7 @@ test('브랜치에 이슈 번호가 있으면 알 이름은 이슈 번호다', (
   expect(eggsOf([session('a', { branch: 'feat/#ENA-12-login' })], emptyPokedex(), NOW)[0]!.label).toBe('#ENA-12')
 })
 
-test('열린 세션마다 알이 하나 있고, 그 브랜치의 MR 에 따라 금이 가거나 부화한다', () => {
+test('열린 세션 중 알을 든 세션은 MR 에 따라 금이 가거나 부화하고, 알 없는 세션은 빈 둥지다', () => {
   const sessions = [
     session('a'),
     session('b', { mrState: 'opened' }),
@@ -66,14 +66,20 @@ test('열린 세션마다 알이 하나 있고, 그 브랜치의 MR 에 따라 �
     session('d', { ...closed }),
     session('e', { branch: 'main' }),
   ]
-  const dex = dexOf({ holds: { a: held('a'), b: held('b'), c: held('c'), d: held('d'), e: held('e') } })
+  const dex = dexOf({ holds: { a: held('a'), b: held('b'), c: held('c'), d: held('d') } })
   const eggs = eggsOf(sessions, dex, NOW)
   expect(eggs.map(egg => [egg.label, egg.stage])).toEqual([
     ['feat/a', 'egg'],
     ['feat/b', 'cracked'],
     ['feat/c', 'hatched'],
-    ['momochi', 'egg'],
+    ['momochi', 'empty'],
   ])
+})
+
+test('알 없는 세션은 빈 둥지로 보이고, 스프라이트를 불러오지 않는다', () => {
+  const eggs = eggsOf([session('a', { state: 'working' })], dexOf(), NOW)
+  expect(eggs.map(egg => [egg.key, egg.stage, egg.isShaking, egg.activity])).toEqual([['a', 'empty', false, 'working']])
+  expect(speciesToLoad({ eggs, daycare: [], box: [], boxPage: 0 }, 40)).toEqual([])
 })
 
 test('대시보드로 표시한 세션만 알이 없고, 알을 든 세션만 닫힐 때 키우미집에 간다', () => {
@@ -350,7 +356,7 @@ test('금 간 알과 부화한 알, 박스 이번 페이지의 포켓몬만 스�
 test('그림은 알 줄, 키우미집, 박스를 합친 줄 수만큼 칸을 채우고 프레임마다 움직인다', () => {
   const dex = dexOf({ holds: { a: held('a'), b: held('b') } })
   const eggs = eggsOf([session('a', { state: 'working' }), session('b', { mrState: 'merged' })], dex, NOW)
-  const input = { eggs, daycare: [dexEgg('d')], box: [dexEgg('k')], boxPage: 0 }
+  const input = { eggs, daycare: [held('d')], box: [dexEgg('k')], boxPage: 0 }
   const width = 40
   const none: SpriteLookup = () => undefined
   const cells = drawNest(input, width, 1, NOW, none)
@@ -360,7 +366,7 @@ test('그림은 알 줄, 키우미집, 박스를 합친 줄 수만큼 칸을 채
   // 박스만 있으면 프레임이 바뀌어도 그대로다
   const boxOnly = { eggs: [], daycare: [], box: [dexEgg('k')], boxPage: 0 }
   expect(drawNest(boxOnly, width, 1, NOW, none)).toEqual(drawNest(boxOnly, width, 2, NOW, none))
-  expect(nestRows({ ...input, daycare: [] }, width)).toBe(nestRows(input, width) - 6)
+  expect(nestRows({ ...input, daycare: [] }, width)).toBe(nestRows(input, width))
 })
 
 test('스프라이트를 불러오면 몬스터볼 대신 그 그림을 그린다', () => {
@@ -371,8 +377,9 @@ test('스프라이트를 불러오면 몬스터볼 대신 그 그림을 그린�
   expect(Array.from(withDot).includes(0x123456)).toBe(true)
 })
 
-test('알과 키우미집이 비면 박스만 그린다', () => {
-  expect(nestRows({ eggs: [], daycare: [], box: [], boxPage: 0 }, 40)).toBe(1 + 12)
+test('키우미집은 알이 0개여도 보인다', () => {
+  const empty = { eggs: [], daycare: [], box: [], boxPage: 0 }
+  expect(nestRows(empty, 40)).toBe(6 + 1 + 12)
 })
 
 test('박스가 한 페이지를 넘으면 페이지를 나누고, 페이지를 넘겨도 그림 높이는 그대로다', () => {
