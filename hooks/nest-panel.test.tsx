@@ -113,9 +113,9 @@ test('옆에 붙은 패널은 DAY CARE 머리줄에 맡긴 포켓몬과 경험�
   await pane.unmount()
 })
 
-test('최종 진화형이 맡겨져 있으면 MAX 로 보이고 Take back 버튼이 있으며, 막 온 전설은 등장 장면을 겹쳐 띄운다', async ($, on) => {
+test('최종 진화형이 맡겨져 있으면 MAX 로 보이고 Take back 버튼이 있으며, 야생 전설은 등장 장면과 함께 몬스터볼과 Run 버튼으로 남는다', async ($, on) => {
   mock.clock(on, { now: NOW })
-  const dex: Pokedex = { ...emptyPokedex(), box: [entry('legend:146', 146, 0), entry('a', 19, 1), entry('b', 6, 2)], lead: 'b', chosen: true, xp: 0, arrival: { species: 146, at: NOW - 3000 } }
+  const dex: Pokedex = { ...emptyPokedex(), box: [entry('legend:146', 146, 0), entry('a', 19, 1), entry('b', 6, 2)], lead: 'b', chosen: true, xp: 0, encounter: { species: 145, at: NOW - 3000, root: '/p/a', branch: null, label: 'b' }, scene: { kind: 'appear', species: 145, at: NOW - 3000 }, fled: { species: 144 } }
   on('env.get', () => ({ value: '/home/test' }))
   on('fs.exists', ($, e) => ({ value: (e as unknown as { path: string }).path.endsWith('mod-hud-pokedex.json') }))
   on('fs.list', () => ({ value: [] }))
@@ -125,7 +125,7 @@ test('최종 진화형이 맡겨져 있으면 MAX 로 보이고 Take back 버튼
       return { value: JSON.stringify(dex) }
     }
     if (path.endsWith('names-en.json')) {
-      return { value: JSON.stringify({ 19: 'Rattata', 6: 'Charizard', 146: 'Moltres' }) }
+      return { value: JSON.stringify({ 19: 'Rattata', 6: 'Charizard', 146: 'Moltres', 145: 'Zapdos', 144: 'Articuno' }) }
     }
     throw new Error('ENOENT')
   })
@@ -147,8 +147,15 @@ test('최종 진화형이 맡겨져 있으면 MAX 로 보이고 Take back 버튼
   expect(nodes(tree, 'Button', { key: 'daycare-toggle' }).map(textOf).join('')).toContain('★ Charizard MAX')
   expect(nodes(tree, 'Button', { key: 'takeback-b', label: 'Take back' }).length).toBe(1)
   expect(nodes(tree, 'Button', { key: 'lead-a' }).length).toBe(1)
-  // 막 온 전설은 알과 DAY CARE 위에 등장 장면을 겹쳐 띄운다
+  // 막 나타난 전설은 알과 DAY CARE 위에 등장 장면을 겹쳐 띄운다
   expect(nodes(tree, 'Raster', { key: 'arrival' }).length).toBe(1)
+  // 장면 뒤에도 야생 전설이 몬스터볼과 Run 버튼과 함께 남는다
+  expect(await pane.find({ type: 'Text', text: /A wild ZAPDOS appeared!/ })).toBeDefined()
+  expect(nodes(tree, 'Button', { key: 'encounter-throw', label: 'Throw POKé BALL' }).length).toBe(1)
+  expect(nodes(tree, 'Button', { key: 'encounter-run', label: 'Run' }).length).toBe(1)
+  // 놓친 전설은 닫을 때까지 안내가 남는다
+  expect(await pane.find({ type: 'Text', text: /Oh no! ARTICUNO fled/ })).toBeDefined()
+  expect(nodes(tree, 'Button', { key: 'fled-close', label: 'Close' }).length).toBe(1)
   await pane.unmount()
 })
 

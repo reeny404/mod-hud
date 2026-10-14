@@ -46,6 +46,7 @@ import {
 } from './issues-lib'
 import { canEvolve } from './dex-data'
 import { advanceEvolution, TAKE_BACK, xpBar, xpLeft } from './evolve-lib'
+import type { EncounterAction } from './evolve-lib'
 import {
   advancePokedex,
   ARRIVAL_FRAMES,
@@ -611,6 +612,8 @@ const POKEDEX_FILE = '.claude/mod-hud-pokedex.json'
 const SENDBOX_DIR = '.claude/mod-hud-sendbox'
 // 앞장세우기 요청. 어느 세션에서 눌러도 박스 칸 key 를 이 파일에 쓰고, 기록을 쓰는 세션이 읽어 반영한 뒤 지운다
 const LEAD_FILE = '.claude/mod-hud-lead'
+// 야생 전설에게 누른 버튼(throw, run, dismiss). 어느 세션에서 눌러도 이 파일에 쓰고, 기록을 쓰는 세션이 읽어 반영한 뒤 지운다
+const ENCOUNTER_FILE = '.claude/mod-hud-encounter'
 // 세션이 닫힌 뒤 머지를 기다리는 알의 MR 을 다시 조회하는 간격
 const PENDING_CHECK_MS = 2 * 60 * 1000
 
@@ -671,6 +674,25 @@ async function pickLead($: EngineInterface, key: string) {
   void refreshSessions($)
 }
 
+async function answerEncounter($: EngineInterface, action: EncounterAction) {
+  const home = await $.env.get('HOME')
+  if (!home) {
+    return
+  }
+  await $.fs.write(`${home}/${ENCOUNTER_FILE}`, action)
+  void refreshSessions($)
+}
+
+async function readEncounterRequest($: EngineInterface, home: string): Promise<EncounterAction | null> {
+  try {
+    const path = `${home}/${ENCOUNTER_FILE}`
+    const text = (await $.fs.exists(path)) ? (await $.fs.read(path)).trim() : ''
+    return text === 'throw' || text === 'run' || text === 'dismiss' ? text : null
+  } catch {
+    return null
+  }
+}
+
 async function readLeadRequest($: EngineInterface, home: string): Promise<string | null> {
   try {
     const path = `${home}/${LEAD_FILE}`
@@ -705,7 +727,8 @@ async function keepPokedex($: EngineInterface, sessions: SessionStatus[], now: n
     const requests = await readSendRequests($, home)
     const advanced = advancePokedex(dex, sessions, now, requests)
     const pick = await readLeadRequest($, home)
-    const grown = advanceEvolution(advanced.dex, sessions, now, pick)
+    const answer = await readEncounterRequest($, home)
+    const grown = advanceEvolution(advanced.dex, sessions, now, pick, answer)
     dex = grown.dex
     if (JSON.stringify(dex) !== before) {
       await $.fs.write(`${home}/${POKEDEX_FILE}`, JSON.stringify(dex))
@@ -716,6 +739,9 @@ async function keepPokedex($: EngineInterface, sessions: SessionStatus[], now: n
     }
     if (pick !== null) {
       await $.process.run(['rm', '-f', `${home}/${LEAD_FILE}`])
+    }
+    if (answer !== null) {
+      await $.process.run(['rm', '-f', `${home}/${ENCOUNTER_FILE}`])
     }
     for (const egg of advanced.born) {
       $.ui.toast(`Your ${egg.label} egg hatched into ${await pokemonName($, home, egg.species)}!`)
@@ -732,8 +758,14 @@ async function keepPokedex($: EngineInterface, sessions: SessionStatus[], now: n
     for (const { entry, from } of grown.evolved) {
       $.ui.toast(`What? ${await pokemonName($, home, from)} evolved into ${await pokemonName($, home, entry.species)}!`)
     }
+    if (grown.dex.encounter && grown.dex.encounter.at === now) {
+      $.ui.toast(`A wild ${(await pokemonName($, home, grown.dex.encounter.species)).toUpperCase()} appeared!`)
+    }
     for (const entry of grown.legends) {
-      $.ui.toast(`The legendary ${await pokemonName($, home, entry.species)} appeared in the PC BOX!`)
+      $.ui.toast(`Gotcha! ${(await pokemonName($, home, entry.species)).toUpperCase()} was caught!`)
+    }
+    for (const species of grown.fled) {
+      $.ui.toast(`Oh no! ${(await pokemonName($, home, species)).toUpperCase()} fled...`)
     }
   }
   await update($, pokedex, () => dex)
@@ -889,16 +921,25 @@ let evolvingSeenAt = 0
 const EVOLVING_FRESH_MS = 60 * 1000
 // 이 패널이 마지막으로 본 전설 등장(기록에 적힌 시각)과, 그 등장 장면을 처음 보인 이 세션의 시각
 let arrivalSeen = 0
-let arrivalShown: { species: number; at: number; name: string } | null = null
+// 보일 전설 장면. appear 는 줄무늬와 함께 나타나는 장면, catch 는 몬스터볼에 잡히는 장면. at 은 이 세션에서 장면을 시작할 시각
+let arrivalShown: { kind: 'appear' | 'catch'; species: number; at: number; name: string } | null = null
+// 장면을 겹쳐 띄운 Raster 가 지금 그려져 있는지. 시작할 때와 끝날 때 다시 그린다
+let arrivalMounted = false
+// 장면마다 drawArrival 의 걸음 범위
+const ARRIVAL_PART = { appear: { from: 0, length: 16 }, catch: { from: 16, length: ARRIVAL_FRAMES - 16 } } as const
 const ARRIVAL_COLUMNS = 60
+// 지금 나타나 있는 야생 전설과 놓친 전설의 이름
+let wild: { species: number; name: string } | null = null
+let gone: string | null = null
 
 // 지금 보일 등장 장면의 걸음. 끝났으면 null
 function arrivalStep(now: number): number | null {
-  if (!arrivalShown) {
+  if (!arrivalShown || now < arrivalShown.at) {
     return null
   }
+  const part = ARRIVAL_PART[arrivalShown.kind]
   const step = Math.floor((now - arrivalShown.at) / NEST_TICK_MS)
-  return step < ARRIVAL_FRAMES ? step : null
+  return step < part.length ? part.from + step : null
 }
 
 function arrivalCells(columns: number, now: number): string {
@@ -1017,11 +1058,15 @@ async function tickNest($: EngineInterface) {
   ].filter(one => one !== null)
   // 전설 등장 장면을 한 걸음씩 칠하고, 끝나면 장면을 걷어 내게 다시 그린다
   if (arrivalShown) {
-    if (arrivalStep(now) === null) {
-      arrivalShown = null
-      $.ui.invalidate('ui.render')
-    } else {
+    const isPlaying = arrivalStep(now) !== null
+    if (isPlaying && arrivalMounted) {
       await $.ui.blit({ requestId: PANE, key: 'arrival', cells: arrivalCells(nestScene.columns, now) })
+    } else if (isPlaying !== arrivalMounted) {
+      // 장면이 시작하거나 끝나면 겹쳐 띄운 Raster 를 붙이거나 걷어 내게 다시 그린다
+      $.ui.invalidate('ui.render')
+    }
+    if (!isPlaying && now >= arrivalShown.at) {
+      arrivalShown = null
     }
   }
   // 막 진화한 박스 칸만 깜빡이므로 그 칸만 다시 칠한다
@@ -1448,10 +1493,18 @@ export const register: Register = (on, options) => {
       }
       const evolving = dex.evolving && dex.evolving.at === evolvingSeen ? { ...dex.evolving, at: evolvingSeenAt } : null
       // 막 온 전설을 처음 보면 이 세션의 시각부터 등장 장면을 센다
-      if (dex.arrival && dex.arrival.at !== arrivalSeen && now - dex.arrival.at < EVOLVING_FRESH_MS) {
-        arrivalSeen = dex.arrival.at
-        arrivalShown = { species: dex.arrival.species, at: now, name: await shownName($, home, dex.arrival.species) }
-        void loadSprite($, dex.arrival.species)
+      if (dex.scene && dex.scene.at !== arrivalSeen && now - dex.scene.at < EVOLVING_FRESH_MS) {
+        arrivalSeen = dex.scene.at
+        // 진화 장면을 보이는 중이면 그 장면이 끝난 뒤 전설이 나타난다
+        const after = evolving && dex.scene.kind === 'appear' ? evolvingSeenAt + EVOLVE_MS : now
+        const name = await shownName($, home, dex.scene.species)
+        arrivalShown = { kind: dex.scene.kind, species: dex.scene.species, at: Math.max(now, after), name }
+        void loadSprite($, dex.scene.species)
+      }
+      wild = dex.encounter ? { species: dex.encounter.species, name: await shownName($, home, dex.encounter.species) } : null
+      gone = dex.fled ? await shownName($, home, dex.fled.species) : null
+      if (dex.encounter) {
+        void loadSprite($, dex.encounter.species)
       }
       const input = { eggs: await read($, eggs), daycare: dex.daycare, box: dex.box, boxPage, lead: dex.lead, evolving }
       nestScene = { columns, rows: nestRows(input, columns), input }
@@ -1687,7 +1740,7 @@ export const register: Register = (on, options) => {
               .map(egg => (
                 <Button key={`send-${egg.key}`} label={`Send to PC BOX · ${egg.label}`} onPress={() => sendToBox($, egg.key)} />
               ))}
-            {arrivalStep(now) !== null && (
+            {(arrivalMounted = arrivalStep(now) !== null) && (
               // 막 온 전설의 등장 장면을 알과 DAY CARE 위에 겹쳐 띄운다. 다른 줄을 밀어내지 않는다
               <Box position="absolute" top={0} width={nestScene.columns} justifyContent="center">
                 <Raster
@@ -1700,6 +1753,29 @@ export const register: Register = (on, options) => {
             )}
             {nestScene.rows > 0 && (
               <Raster key="nest" columns={nestScene.columns} rows={nestScene.rows} cells={nestCells(nestScene, now)} />
+            )}
+            {wild && (
+              // 야생 전설은 몬스터볼을 던지거나 Run 할 때까지(최대 한 시간) 남는다
+              <Box flexDirection="column" alignItems="center" width={nestScene.columns}>
+                {(() => {
+                  const image = drawPortrait(wild.species, lookupSprite)
+                  return image && <Raster key="wild" columns={image.columns} rows={image.rows} cells={base64Of(image.cells)} />
+                })()}
+                <Text bold color="#ffe080">
+                  A wild {wild.name.toUpperCase()} appeared!
+                </Text>
+                <Box>
+                  <Button key="encounter-throw" label="Throw POKé BALL" onPress={() => answerEncounter($, 'throw')} />
+                  <Button key="encounter-run" label="Run" onPress={() => answerEncounter($, 'run')} />
+                </Box>
+              </Box>
+            )}
+            {gone && (
+              // 놓친 전설은 사용자가 닫을 때까지 안내가 남는다
+              <Box justifyContent="center" width={nestScene.columns}>
+                <Text dimColor>Oh no! {gone.toUpperCase()} fled... </Text>
+                <Button key="fled-close" label="Close" onPress={() => answerEncounter($, 'dismiss')} />
+              </Box>
             )}
             <Box backgroundColor="#c8782a" width={nestScene.columns} paddingX={1}>
               {/* 머리줄을 누르면 키우미집 풀밭을 접거나 편다 */}

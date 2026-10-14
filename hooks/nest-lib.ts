@@ -211,7 +211,11 @@ export const emptyPokedex = (): Pokedex => ({
   seen: [],
   legends: [],
   evolving: null,
-  arrival: null,
+  encounter: null,
+  scene: null,
+  fled: null,
+  escaped: [],
+  waiting: [],
 })
 
 export function parsePokedex(text: string): Pokedex {
@@ -225,9 +229,13 @@ export function parsePokedex(text: string): Pokedex {
       const one = value as { key?: unknown; from?: unknown; at?: unknown } | null
       return typeof one?.key === 'string' && typeof one.from === 'number' && typeof one.at === 'number'
     }
-    const isArrival = (value: unknown): value is Pokedex['arrival'] => {
-      const one = value as { species?: unknown; at?: unknown } | null
-      return typeof one?.species === 'number' && typeof one.at === 'number'
+    const isEncounter = (value: unknown): value is Pokedex['encounter'] => {
+      const one = value as { species?: unknown; at?: unknown; root?: unknown; label?: unknown } | null
+      return typeof one?.species === 'number' && typeof one.at === 'number' && typeof one.root === 'string' && typeof one.label === 'string'
+    }
+    const isScene = (value: unknown): value is Pokedex['scene'] => {
+      const one = value as { kind?: unknown; species?: unknown; at?: unknown } | null
+      return (one?.kind === 'appear' || one?.kind === 'catch') && typeof one.species === 'number' && typeof one.at === 'number'
     }
     const record = <T>(value: unknown): Record<string, T> => (value && typeof value === 'object' ? (value as Record<string, T>) : {})
     // 옛 기록의 sent 는 { count, branch } 라 버린다
@@ -250,7 +258,11 @@ export function parsePokedex(text: string): Pokedex {
       seen: numbers(parsed.seen),
       legends: numbers(parsed.legends),
       evolving: isEvolving(parsed.evolving) ? parsed.evolving : null,
-      arrival: isArrival(parsed.arrival) ? parsed.arrival : null,
+      encounter: isEncounter(parsed.encounter) ? parsed.encounter : null,
+      scene: isScene(parsed.scene) ? parsed.scene : null,
+      fled: typeof parsed.fled?.species === 'number' ? { species: parsed.fled.species } : null,
+      escaped: numbers(parsed.escaped),
+      waiting: numbers(parsed.waiting),
     }
   } catch {
     return emptyPokedex()

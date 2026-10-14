@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { BoxEntry, Pokedex, SessionStatus } from '../types'
-import { advanceEvolution, autoLead, evolutionOf, TAKE_BACK, XP_GAP_MS, XP_PER_EVOLUTION_MS, xpBar, xpLeft } from './evolve-lib'
+import { advanceEvolution, autoLead, ENCOUNTER_MS, SCENE_GAP_MS, evolutionOf, TAKE_BACK, XP_GAP_MS, XP_PER_EVOLUTION_MS, xpBar, xpLeft } from './evolve-lib'
 import { emptyPokedex, parsePokedex } from './nest-lib'
 
 const ROOT = '/p/momochi'
@@ -96,13 +96,51 @@ test('Take back 을 누르면 키우미집에서 데려오고 다른 포켓몬�
   expect(alone.lead).toBe(null)
 })
 
-test('전설이 오면 모든 패널이 등장 장면을 보이게 기록에 남긴다', () => {
-  const { dex } = advanceEvolution(dexOf({ box: [entry('c', 5)], xp: XP_PER_EVOLUTION_MS }), [], NOW)
-  expect(dex.arrival).toEqual({ species: 146, at: NOW })
-  // 아무 일 없으면 그대로 둔다
-  expect(advanceEvolution(dex, [], NOW + 1000).dex.arrival).toEqual({ species: 146, at: NOW })
+test('전설 조건을 채우면 박스에 바로 넣지 않고 야생으로 나타나 모든 패널이 등장 장면을 보인다', () => {
+  const { dex, legends } = advanceEvolution(dexOf({ box: [entry('c', 5)], xp: XP_PER_EVOLUTION_MS }), [], NOW)
+  expect(legends).toEqual([])
+  expect(dex.box.some(one => one.species === 146)).toBe(false)
+  expect(dex.encounter).toEqual({ species: 146, at: NOW, root: ROOT, branch: 'feat/c', label: 'c' })
+  expect(dex.scene).toEqual({ kind: 'appear', species: 146, at: NOW })
+  expect(dex.legends).not.toContain(146)
+  // 아무 일 없으면 그대로 기다린다
+  expect(advanceEvolution(dex, [], NOW + 1000).dex.encounter?.species).toBe(146)
 })
 
+test('몬스터볼을 던지면 잡혀 박스에 들어오고 잡는 장면을 보인다', () => {
+  const met = advanceEvolution(dexOf({ box: [entry('c', 5)], xp: XP_PER_EVOLUTION_MS }), [], NOW).dex
+  const { dex, legends } = advanceEvolution(met, [], NOW + 5000, null, 'throw')
+  expect(legends.map(one => one.species)).toEqual([146])
+  expect(dex.box[0]).toEqual({ key: 'legend:146', species: 146, root: ROOT, branch: 'feat/c', label: 'c', at: NOW + 5000 })
+  expect(dex.legends).toContain(146)
+  expect(dex.encounter).toBe(null)
+  expect(dex.scene).toEqual({ kind: 'catch', species: 146, at: NOW + 5000 })
+})
+
+test('Run 을 누르거나 한 시간 동안 두면 놓치고, 놓친 안내는 닫을 때까지 남는다', () => {
+  const met = advanceEvolution(dexOf({ box: [entry('c', 5)], xp: XP_PER_EVOLUTION_MS }), [], NOW).dex
+  const ran = advanceEvolution(met, [], NOW + 5000, null, 'run')
+  expect(ran.dex.encounter).toBe(null)
+  expect(ran.dex.fled).toEqual({ species: 146 })
+  expect(ran.fled).toEqual([146])
+  expect(ran.dex.box.some(one => one.species === 146)).toBe(false)
+  expect(advanceEvolution(ran.dex, [], NOW + 99_999_999).dex.fled).toEqual({ species: 146 })
+  expect(advanceEvolution(ran.dex, [], NOW + 6000, null, 'dismiss').dex.fled).toBe(null)
+  const ignored = advanceEvolution(met, [], NOW + ENCOUNTER_MS).dex
+  expect(ignored.encounter).toBe(null)
+  expect(ignored.fled).toEqual({ species: 146 })
+})
+
+test('놓친 전설은 다음에 그 조건의 최종 진화형을 만들 때 다시 나타나고, 잡은 전설은 다시 나타나지 않는다', () => {
+  const met = advanceEvolution(dexOf({ box: [entry('c', 5), entry('v', 37, 5)], xp: XP_PER_EVOLUTION_MS }), [], NOW).dex
+  const later = (n: number) => NOW + n * SCENE_GAP_MS
+  const ran = advanceEvolution(met, [], later(1), null, 'run').dex
+  const again = advanceEvolution({ ...ran, lead: 'v', xp: XP_PER_EVOLUTION_MS }, [], later(2)).dex
+  expect(again.encounter?.species).toBe(146)
+  const caught = advanceEvolution(again, [], later(3), null, 'throw').dex
+  const third = advanceEvolution({ ...caught, box: [...caught.box, entry('w', 58, 9)], lead: 'w', xp: XP_PER_EVOLUTION_MS }, [], later(4)).dex
+  expect(third.encounter).toBe(null)
+})
 test('자동으로 고른 포켓몬은 진화해도 계속 앞장선다', () => {
   const box = [entry('c', 4, 0), entry('p', 16, 9), entry('p2', 16, 10), entry('p3', 16, 11)]
   const first = advanceEvolution(dexOf({ box, lead: 'c' }), [], NOW).dex
@@ -132,32 +170,45 @@ test('이브이는 칸 key 로 셋 중 하나로 진화하고 같은 key 는 늘
   expect(evolutionOf(entry('z', 6))).toBe(null)
 })
 
-test('진화로 불꽃 최종 진화형을 처음 만들면 파이어가 한 번만 박스에 들어온다', () => {
-  const first = advanceEvolution(dexOf({ box: [entry('c', 5), entry('v', 37, 5)], xp: XP_PER_EVOLUTION_MS }), [], NOW)
-  expect(first.legends.map(one => one.species)).toEqual([146])
-  expect(first.dex.box[0]).toEqual({ key: 'legend:146', species: 146, root: ROOT, branch: 'feat/c', label: 'c', at: NOW })
-  expect(first.dex.legends).toContain(146)
-  const second = advanceEvolution({ ...first.dex, lead: 'v', xp: XP_PER_EVOLUTION_MS }, [], NOW)
-  expect(second.dex.box.find(one => one.key === 'v')!.species).toBe(38)
-  expect(second.legends).toEqual([])
-})
 
 test('알에서 나온 최종 진화형은 새 조건에 들지 않는다', () => {
-  const { dex, legends } = advanceEvolution(dexOf({ box: [entry('z', 6)] }), [], NOW)
-  expect(legends).toEqual([])
-  expect(dex.box.some(one => one.species === 146)).toBe(false)
+  const { dex } = advanceEvolution(dexOf({ box: [entry('z', 6)] }), [], NOW)
+  expect(dex.encounter).toBe(null)
 })
-
-test('도감이 100종이면 뮤츠가, 뮤를 뺀 150종이면 뮤가 들어온다', () => {
+test('도감이 100종이면 뮤츠가, 뮤를 뺀 150종이면 뮤가 나타나고, 놓치면 다음에 새 포켓몬이 박스에 들어올 때 다시 나타난다', () => {
   const ninetyNine = Array.from({ length: 99 }, (_, i) => i + 1)
-  expect(advanceEvolution(dexOf({ box: [entry('a', 1)], seen: ninetyNine }), [], NOW).legends).toEqual([])
-  const hundred = advanceEvolution(dexOf({ box: [entry('a', 100)], seen: ninetyNine }), [], NOW)
-  expect(hundred.legends.map(one => one.species)).toEqual([150])
+  expect(advanceEvolution(dexOf({ box: [entry('a', 1)], seen: ninetyNine }), [], NOW).dex.encounter).toBe(null)
+  const hundred = advanceEvolution(dexOf({ box: [entry('a', 100)], seen: ninetyNine }), [], NOW).dex
+  expect(hundred.encounter?.species).toBe(150)
+  const later = (n: number) => NOW + n * SCENE_GAP_MS
+  const ran = advanceEvolution(hundred, [], later(1), null, 'run').dex
+  // 조건은 계속 채워져 있지만 새 포켓몬이 없으면 다시 나타나지 않는다
+  expect(advanceEvolution(ran, [], later(2)).dex.encounter).toBe(null)
+  // 최종 진화형(이상해꽃)을 만들어도 다시 나타나지 않는다
+  const grown = advanceEvolution({ ...ran, box: [...ran.box, entry('b', 2, 0)], lead: 'b', xp: XP_PER_EVOLUTION_MS }, [], later(3)).dex
+  expect(grown.encounter).toBe(null)
+  // 알에서 나온 포켓몬이 박스에 들어오면(박스에 들어온 시각이 지금이면) 다시 나타난다
+  const hatched = advanceEvolution({ ...grown, box: [entry('n', 16, later(4)), ...grown.box] }, [], later(4)).dex
+  expect(hatched.encounter?.species).toBe(150)
   const all = Array.from({ length: 149 }, (_, i) => i + 1)
-  const mew = advanceEvolution(dexOf({ box: [entry('a', 150)], seen: all, legends: [150] }), [], NOW)
-  expect(mew.legends.map(one => one.species)).toEqual([151])
+  const mew = advanceEvolution(dexOf({ box: [entry('a', 150)], seen: all, legends: [150] }), [], NOW).dex
+  expect(mew.encounter?.species).toBe(151)
 })
 
+test('전설 둘이 한꺼번에 조건을 채우면 하나는 기다렸다가, 앞의 전설을 잡거나 놓치고 장면이 끝나면 이어서 나타난다', () => {
+  // 리자몽 진화로 파이어 조건을, 리자몽이 100번째 종이라 뮤츠 조건을 함께 채운다
+  const ninetyNine = Array.from({ length: 99 }, (_, i) => i + 1).map(n => (n === 6 ? 100 : n))
+  const met = advanceEvolution(dexOf({ box: [entry('c', 5)], seen: ninetyNine, xp: XP_PER_EVOLUTION_MS }), [], NOW).dex
+  expect(met.encounter?.species).toBe(146)
+  expect(met.waiting).toEqual([150])
+  const caught = advanceEvolution(met, [], NOW + 1000, null, 'throw').dex
+  expect(caught.encounter).toBe(null)
+  // 잡는 장면이 끝날 때까지는 나타나지 않는다
+  expect(advanceEvolution(caught, [], NOW + 1000 + SCENE_GAP_MS - 1).dex.encounter).toBe(null)
+  const next = advanceEvolution(caught, [], NOW + 1000 + SCENE_GAP_MS).dex
+  expect(next.encounter?.species).toBe(150)
+  expect(next.waiting).toEqual([])
+})
 test('예전 기록을 읽으면 도감은 박스로 채우고 박스에 있는 전설은 받은 것으로 친다', () => {
   const old = parsePokedex(JSON.stringify({ day: '2026-10-14', box: [entry('m', 150), entry('a', 1, 3)] }))
   expect(old.xp).toBe(0)
@@ -167,7 +218,11 @@ test('예전 기록을 읽으면 도감은 박스로 채우고 박스에 있는 
   expect(old.seen).toEqual([])
   expect(old.legends).toEqual([])
   expect(old.evolving).toBe(null)
-  expect(old.arrival).toBe(null)
+  expect(old.scene).toBe(null)
+  expect(old.encounter).toBe(null)
+  expect(old.fled).toBe(null)
+  expect(old.escaped).toEqual([])
+  expect(old.waiting).toEqual([])
   const { dex, legends } = advanceEvolution(old, [], NOW)
   expect([...dex.seen].sort((a, b) => a - b)).toEqual([1, 150])
   expect(dex.legends).toContain(150)

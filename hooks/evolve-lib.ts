@@ -15,6 +15,12 @@ export const XP_GAP_MS = 5 * 60 * 1000
 const CROWD = 3
 // 키우미집에서 데려오기 요청. 맡길 포켓몬 key 대신 이 값을 보낸다
 export const TAKE_BACK = '-'
+// 야생 전설이 기다리는 시간. 지나면 달아난다
+export const ENCOUNTER_MS = 60 * 60 * 1000
+// 앞의 전설 장면이 끝나길 기다리는 시간. 차례를 기다리던 전설은 이만큼 지난 뒤 나타난다
+export const SCENE_GAP_MS = 10 * 1000
+// 야생 전설에게 하는 일. throw 는 몬스터볼 던지기, run 은 무시하기, dismiss 는 달아난 안내 닫기
+export type EncounterAction = 'throw' | 'run' | 'dismiss'
 const LEGEND_SPECIES: readonly number[] = Object.values(LEGENDS)
 
 // 진화하면 될 종. 이브이처럼 갈라지면 칸 key 로 골라 다시 계산해도 같다
@@ -42,7 +48,15 @@ export function autoLead(box: readonly BoxEntry[]): string | null {
 
 // pick 은 사용자가 Leave at DAY CARE 를 누른 박스 칸의 key, 또는 Take back 을 누른 TAKE_BACK
 // evolved 는 이번에 진화한 칸과 진화 전 종, legends 는 이번에 박스에 들어온 전설
-export function advanceEvolution(dex: Pokedex, sessions: readonly SessionStatus[], now: number, pick: string | null = null) {
+// action 은 야생 전설에게 누른 버튼
+// legends 는 이번에 잡은 전설, fled 는 이번에 달아난 전설
+export function advanceEvolution(
+  dex: Pokedex,
+  sessions: readonly SessionStatus[],
+  now: number,
+  pick: string | null = null,
+  action: EncounterAction | null = null,
+) {
   let box = [...dex.box]
   const seen = new Set([...dex.seen, ...box.map(one => one.species)])
   const legends = new Set([...dex.legends, ...box.map(one => one.species).filter(species => LEGEND_SPECIES.includes(species))])
@@ -87,30 +101,82 @@ export function advanceEvolution(dex: Pokedex, sessions: readonly SessionStatus[
     xp = 0
   }
 
-  let arrival = dex.arrival
-  // 전설은 처음 조건을 채울 때 한 번만 온다. 저장소와 라벨은 진화한 칸, 없으면 박스 맨 앞 칸의 것을 쓴다
-  const welcome = (species: number) => {
+  let encounter = dex.encounter
+  let scene = dex.scene
+  let fled = dex.fled
+  const escaped = new Set(dex.escaped)
+  const waiting = [...dex.waiting]
+  const gone: number[] = []
+  const runAway = () => {
+    if (encounter) {
+      fled = { species: encounter.species }
+      escaped.add(encounter.species)
+      gone.push(encounter.species)
+      encounter = null
+    }
+  }
+  if (action === 'throw' && encounter) {
+    const entry = { key: `legend:${encounter.species}`, species: encounter.species, root: encounter.root, branch: encounter.branch, label: encounter.label, at: now }
+    box = [entry, ...box]
+    legends.add(entry.species)
+    seen.add(entry.species)
+    escaped.delete(entry.species)
+    arrived.push(entry)
+    scene = { kind: 'catch', species: entry.species, at: now }
+    encounter = null
+  } else if (action === 'run' || (encounter && now - encounter.at >= ENCOUNTER_MS)) {
+    runAway()
+  }
+  if (action === 'dismiss') {
+    fled = null
+  }
+
+  // 전설은 박스에 바로 오지 않고 야생으로 나타난다. 잡은 전설은 다시 나타나지 않는다
+  // 다른 전설이 나타나 있으면 차례를 기다린다. 저장소와 라벨은 진화한 칸, 없으면 박스 맨 앞 칸의 것을 쓴다
+  const meet = (species: number) => {
     const from = evolved[0]?.entry ?? box[0]
-    if (legends.has(species) || !from) {
+    if (legends.has(species) || encounter?.species === species || !from) {
       return
     }
-    const entry = { key: `legend:${species}`, species, root: from.root, branch: from.branch, label: from.label, at: now }
-    box = [entry, ...box]
-    legends.add(species)
-    seen.add(species)
-    arrived.push(entry)
-    arrival = { species, at: now }
+    // 다른 전설이 나타나 있거나 전설 장면이 아직 끝나지 않았으면 차례를 기다린다
+    if (encounter || (scene && now - scene.at < SCENE_GAP_MS)) {
+      if (!waiting.includes(species)) {
+        waiting.push(species)
+      }
+      return
+    }
+    encounter = { species, at: now, root: from.root, branch: from.branch, label: from.label }
+    scene = { kind: 'appear', species, at: now }
+    escaped.delete(species)
+    if (waiting.includes(species)) {
+      waiting.splice(waiting.indexOf(species), 1)
+    }
   }
   for (const [legend, finals] of Object.entries(LEGEND_FINALS)) {
     if (evolved.some(one => finals.includes(one.entry.species))) {
-      welcome(Number(legend))
+      meet(Number(legend))
     }
   }
-  if (seen.size >= MEWTWO_DEX) {
-    welcome(LEGENDS.mewtwo)
+  // 도감 조건은 한 번 채우면 계속 채워져 있어, 달아난 뒤에는 새 포켓몬이 박스에 들어올 때만 다시 나타난다
+  // 박스에 막 들어온 칸은 들어온 시각이 지금이다(advancePokedex 가 같은 now 로 넣는다). 진화한 칸과 전설 칸은 시각이 그대로거나 전설이다
+  const newcomer = box.some(one => one.at === now && !one.key.startsWith('legend:'))
+  const dexReady = (species: number) => !escaped.has(species) || newcomer
+  if (seen.size >= MEWTWO_DEX && dexReady(LEGENDS.mewtwo)) {
+    meet(LEGENDS.mewtwo)
   }
-  if (Array.from({ length: LEGENDS.mew - 1 }, (_, i) => i + 1).every(species => seen.has(species))) {
-    welcome(LEGENDS.mew)
+  if (Array.from({ length: LEGENDS.mew - 1 }, (_, i) => i + 1).every(species => seen.has(species)) && dexReady(LEGENDS.mew)) {
+    meet(LEGENDS.mew)
+  }
+
+  // 차례를 기다리던 전설은 앞의 전설이 끝나고 그 장면도 끝난 뒤 나타난다
+  if (!encounter && waiting.length > 0 && (!scene || now - scene.at >= SCENE_GAP_MS)) {
+    meet(waiting.shift()!)
+  }
+  // 차례를 기다리는 동안 잡은 전설은 빼 둔다
+  for (const species of [...waiting]) {
+    if (legends.has(species)) {
+      waiting.splice(waiting.indexOf(species), 1)
+    }
   }
 
   const next: Pokedex = {
@@ -123,9 +189,13 @@ export function advanceEvolution(dex: Pokedex, sessions: readonly SessionStatus[
     seen: [...seen],
     legends: [...legends],
     evolving,
-    arrival,
+    encounter,
+    scene,
+    fled,
+    escaped: [...escaped],
+    waiting,
   }
-  return { dex: next, evolved, legends: arrived }
+  return { dex: next, evolved, legends: arrived, fled: gone }
 }
 
 const BAR = 5

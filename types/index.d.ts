@@ -180,8 +180,16 @@ export type Pokedex = {
   legends: number[]
   // 가장 최근 진화. 모든 세션의 패널이 깜빡임을 그리는 데 쓴다
   evolving: { key: string; from: number; at: number } | null
-  // 가장 최근에 온 전설. 모든 세션의 패널이 등장 장면을 보이는 데 쓴다
-  arrival: { species: number; at: number } | null
+  // 지금 나타나 있는 야생 전설. 몬스터볼을 던지면 잡히고, Run 하거나 한 시간이 지나면 달아난다
+  encounter: { species: number; at: number; root: string; branch: string | null; label: string } | null
+  // 가장 최근 전설 장면. appear 는 나타나는 장면, catch 는 잡는 장면. 모든 세션의 패널이 겹쳐 띄우는 데 쓴다
+  scene: { kind: 'appear' | 'catch'; species: number; at: number } | null
+  // 방금 달아난 전설. 사용자가 닫을 때까지 안내가 남는다
+  fled: { species: number } | null
+  // 달아난 전설. 새는 그 타입 최종 진화형을 다시 만들 때, 뮤츠와 뮤는 새 포켓몬이 박스에 들어올 때 다시 나타난다
+  escaped: number[]
+  // 다른 전설이 나타나 있어 차례를 기다리는 전설. 앞의 전설을 잡거나 놓치고 장면이 끝나면 이어서 나타난다
+  waiting: number[]
 }
 
 // 패널에 그릴 알 하나
