@@ -149,6 +149,13 @@ async function writeStatus($: EngineInterface, patch: Partial<SessionStatus>) {
       return
     }
     const id = await $.session.id()
+    // /clear 나 /resume 뒤 classic SessionStart 가 mod 에 오지 않을 때가 있어, 새 id 로 처음 쓸 때 끝난 세션을 이어 받는다
+    const inherited = handoff && handoff.id !== id ? { predecessor: handoff.id, isDashboard: handoff.isDashboard } : {}
+    if (handoff && handoff.id !== id) {
+      // 끝난 세션의 요청, 상태는 새 세션 것이 아니다
+      mine = null
+      handoff = null
+    }
     const cwd = await $.session.cwd()
     const repo = await $.session.repo()
     const root = repo?.root ?? cwd
@@ -172,6 +179,7 @@ async function writeStatus($: EngineInterface, patch: Partial<SessionStatus>) {
       mrState: prev?.mrState,
       mrBranch: prev?.mrBranch,
       ...mine,
+      ...inherited,
       ...patch,
       id,
       cwd,
@@ -1049,15 +1057,13 @@ export const register: Register = (on, options) => {
   // /clear 뒤 새 세션에는 이 이벤트만 오므로, 새로고침 주기를 기다리지 않고 바로 다시 채운다
   on('classic.SessionStart', async ($, e, next) => {
     transcriptPath = e.transcript_path || null
-    // 이어 연 세션은 이미 이름이 있다
-    const inherited = handoff ? { predecessor: handoff.id, isDashboard: handoff.isDashboard } : {}
-    handoff = null
+    // 이어 연 세션은 이미 이름이 있다. 끝난 세션은 writeStatus 가 이어 받는다
     if (e.source === 'resume') {
-      await writeStatus($, { title: await readTitle($), ...inherited })
+      await writeStatus($, { title: await readTitle($) })
     }
     if (e.source === 'clear') {
       mine = null
-      await writeStatus($, { state: 'waiting', ...inherited })
+      await writeStatus($, { state: 'waiting' })
       // 상태 파일만 읽고 git 은 돌리지 않아 /clear 를 오래 붙잡지 않는다
       await refreshSessions($)
       if (await ensureRepo($)) {
