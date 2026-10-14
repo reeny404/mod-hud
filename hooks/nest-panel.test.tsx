@@ -54,3 +54,38 @@ test('옆에 붙은 패널은 PC BOX 머리줄에 앞장선 포켓몬과 경험�
   expect(await pane.find({ type: 'Button', key: 'lead-b' } as never)).toBeUndefined()
   await pane.unmount()
 })
+
+test('다른 세션이 조금 전에 적은 진화도 이 패널이 처음 보면 그 칸의 페이지로 넘겨 보인다', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const dex: Pokedex = { ...emptyPokedex(), box: [entry('a', 19, 1), entry('b', 6, 2), entry('c', 16, 3), entry('d', 20, 4)], lead: 'a', xp: 0, evolving: { key: 'd', from: 19, at: NOW - 20_000 } }
+  on('env.get', () => ({ value: '/home/test' }))
+  on('fs.exists', ($, e) => ({ value: (e as unknown as { path: string }).path.endsWith('mod-hud-pokedex.json') }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.read', ($, e) => {
+    const path = (e as unknown as { path: string }).path
+    if (path.endsWith('mod-hud-pokedex.json')) {
+      return { value: JSON.stringify(dex) }
+    }
+    if (path.endsWith('names-en.json')) {
+      return { value: JSON.stringify({ 19: 'Rattata', 20: 'Raticate', 6: 'Charizard', 16: 'Pidgey', 17: 'Pidgeotto' }) }
+    }
+    throw new Error('ENOENT')
+  })
+  on('fs.write', () => ({ value: undefined }))
+  on('http.fetch', () => ({ value: { ok: false, status: 404, text: '' } }) as never)
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('command.register', () => ({ value: { name: 'x' } }) as never)
+  on('session.id', () => ({ value: 'self' }))
+  on('session.cwd', () => ({ value: '/p/a' }))
+  on('session.repo', () => ({ value: null }))
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.blit', () => ({ value: { deny: false } }) as never)
+  on('session.start', ($, e) => e as never)
+  await $.session.start({ source: 'startup', cwd: '/p/a' } as never)
+
+  const props = { placement: 'dock', bodyColumns: 60, scroll: { bodyRows: 60 } }
+  const pane = await $.ui.mount({ plugin: 'mod-hud', surface: 'terminal', component: 'Pane', requestId: 'mod-hud', props } as never)
+  // 기록을 쓰는 세션이 20초 전에 적은 진화라도 이 패널은 처음 보므로 넘겨서 깜빡인다
+  expect(await pane.find({ type: 'Text', text: /PC BOX  2\/2/ })).toBeDefined()
+  await pane.unmount()
+})

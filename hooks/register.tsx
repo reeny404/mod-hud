@@ -875,8 +875,12 @@ async function shownName($: EngineInterface, home: string, species: number): Pro
 let nestScene: { columns: number; rows: number; input: NestInput } | null = null
 // 보고 있는 박스 페이지. 0부터 센다
 let boxPage = 0
-// 페이지를 넘겨 준 마지막 진화 시각. 같은 진화로는 한 번만 넘긴다
+// 이 패널이 마지막으로 본 진화의 시각(기록에 적힌 것)과 그 진화를 처음 본 이 세션의 시각
+// 진화는 기록을 쓰는 세션이 적고 다른 세션은 30초마다 읽으므로, 깜빡임은 이 세션이 처음 본 때부터 센다
 let evolvingSeen = 0
+let evolvingSeenAt = 0
+// 이보다 오래된 진화는 처음 봐도 깜빡이지 않는다. 다른 세션이 기록을 읽는 간격보다 넉넉하다
+const EVOLVING_FRESH_MS = 60 * 1000
 // PC BOX 머리줄. 한국어 대신 영어 이름이지만 ★ 와 막대는 Raster 가 못 그려 Text 로 그린다
 let boxHeader: { count: number; lead: string | null; canLead: boolean } = { count: 0, lead: null, canLead: false }
 // 박스 칸에 마우스를 올리면 뜨는 카드의 글자. 칸 key 로 찾는다
@@ -1374,11 +1378,13 @@ export const register: Register = (on, options) => {
       // 새 진화를 처음 보면 그 칸이 있는 페이지로 넘긴다
       const columns = e.props.bodyColumns
       const home = (await $.env.get('HOME')) ?? ''
-      if (dex.evolving && dex.evolving.at !== evolvingSeen && now - dex.evolving.at < EVOLVE_MS) {
+      if (dex.evolving && dex.evolving.at !== evolvingSeen && now - dex.evolving.at < EVOLVING_FRESH_MS) {
         evolvingSeen = dex.evolving.at
+        evolvingSeenAt = now
         boxPage = boxPageOfKey({ eggs: [], daycare: [], box: dex.box, boxPage }, columns, dex.evolving.key)
       }
-      const input = { eggs: await read($, eggs), daycare: dex.daycare, box: dex.box, boxPage, lead: dex.lead, evolving: dex.evolving }
+      const evolving = dex.evolving && dex.evolving.at === evolvingSeen ? { ...dex.evolving, at: evolvingSeenAt } : null
+      const input = { eggs: await read($, eggs), daycare: dex.daycare, box: dex.box, boxPage, lead: dex.lead, evolving }
       nestScene = { columns, rows: nestRows(input, columns), input }
       const lead = dex.box.find(entry => entry.key === dex.lead)
       boxHeader = {
