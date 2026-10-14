@@ -850,6 +850,21 @@ export function boxOnPage(input: NestInput, width: number): BoxEntry[] {
   return input.box.slice(page * size, (page + 1) * size)
 }
 
+// 박스 아이콘의 원본 크기(7세대 아이콘은 40x30). 마우스를 올리면 뜨는 카드에 줄이지 않고 그린다
+const PORTRAIT_SIZE = 40
+
+export function drawPortrait(species: number, lookup: SpriteLookup): { columns: number; rows: number; cells: Uint32Array } | null {
+  const image = lookup(species, PORTRAIT_SIZE)
+  if (!image) {
+    return null
+  }
+  const canvas = canvasOf(image.width, image.height + (image.height % 2))
+  blit(canvas, 0, 0, image)
+  const out: number[] = []
+  pixelCells(canvas, out)
+  return { columns: canvas.width, rows: canvas.height / 2, cells: Uint32Array.from(out) }
+}
+
 // 박스 칸 key 가 있는 페이지. 막 진화한 칸으로 페이지를 넘길 때 쓴다
 export function boxPageOfKey(input: NestInput, width: number, key: string): number {
   const index = input.box.findIndex(entry => entry.key === key)

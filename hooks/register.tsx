@@ -44,7 +44,7 @@ import {
   parseWorktrees,
   readEnvValue,
 } from './issues-lib'
-import { advanceEvolution, xpBar, xpLeft } from './evolve-lib'
+import { advanceEvolution, evolutionOf, xpBar, xpLeft } from './evolve-lib'
 import { canEvolve } from './dex-data'
 import {
   advancePokedex,
@@ -55,11 +55,13 @@ import {
   boxPerRow,
   drawBoxTile,
   drawNest,
+  drawPortrait,
   eggsOf,
   EVOLVE_MS,
   eggsOnScreen,
   emptyPokedex,
   keeperOf,
+  localDay,
   nestRows,
   parsePokedex,
   speciesToLoad,
@@ -831,6 +833,10 @@ let boxPage = 0
 let evolvingSeen = 0
 // PC BOX 머리줄. 한국어 대신 영어 이름이지만 ★ 와 막대는 Raster 가 못 그려 Text 로 그린다
 let boxHeader: { count: number; lead: string | null; canLead: boolean } = { count: 0, lead: null, canLead: false }
+// 박스 칸에 마우스를 올리면 뜨는 카드의 글자. 칸 key 로 찾는다
+let boxCards = new Map<string, { name: string; caught: string; next: string | null; canLead: boolean }>()
+// 카드 폭. 원본 아이콘 40칸과 테두리
+const CARD_COLUMNS = 42
 let nestFrame = 0
 // 그림이 보일 때만 돈다. 패널이 닫히거나 입력창 위로 옮겨 칠할 곳이 없으면 멈춘다
 let nestTimer: ReturnType<EngineInterface['clock']['every']> | null = null
@@ -1331,6 +1337,16 @@ export const register: Register = (on, options) => {
         lead: lead ? `★ ${await pokemonName($, home, lead.species)} ${xpBar(dex.xp)} ${xpLeft(dex.xp)}` : null,
         canLead: dex.box.some(entry => canEvolve(entry.species)),
       }
+      boxCards = new Map()
+      for (const entry of boxOnPage(input, columns)) {
+        const next = evolutionOf(entry)
+        boxCards.set(entry.key, {
+          name: await pokemonName($, home, entry.species),
+          caught: localDay(entry.at),
+          next: next === null ? null : await pokemonName($, home, next),
+          canLead: next !== null && entry.key !== dex.lead,
+        })
+      }
       for (const species of speciesToLoad(input, e.props.bodyColumns)) {
         void loadSprite($, species)
       }
@@ -1561,6 +1577,35 @@ export const register: Register = (on, options) => {
               {boxTiles(nestScene).map((entry, i) => (
                 <Box key={`tile-${i}`}>
                   <Raster key={`tile-${i}`} columns={TILE} rows={TILE_ROWS} cells={tileCells(nestScene!, entry, now)} />
+                  {entry && boxCards.has(entry.key) && (
+                    // 마우스를 올린 칸 위로 원본 크기 카드를 띄운다. 다른 줄을 밀어내지 않게 겹쳐 그린다
+                    <Box
+                      position="absolute"
+                      bottom={TILE_ROWS}
+                      left={i < boxTiles(nestScene!).length / 2 ? 0 : TILE - CARD_COLUMNS}
+                      width={CARD_COLUMNS}
+                      display="none"
+                      hover={{ display: 'flex' }}
+                      flexDirection="column"
+                      borderStyle="round"
+                    >
+                      {(() => {
+                        const portrait = drawPortrait(entry.species, lookupSprite)
+                        return (
+                          portrait && (
+                            <Raster key={`portrait-${i}`} columns={portrait.columns} rows={portrait.rows} cells={base64Of(portrait.cells)} />
+                          )
+                        )
+                      })()}
+                      <Text bold>{boxCards.get(entry.key)!.name}</Text>
+                      <Text dimColor>caught {boxCards.get(entry.key)!.caught}</Text>
+                      {boxCards.get(entry.key)!.next && <Text>→ {boxCards.get(entry.key)!.next}</Text>}
+                      {entry.key === nestScene!.input.lead && <Text color="#ffe080">{boxHeader.lead}</Text>}
+                      {boxCards.get(entry.key)!.canLead && (
+                        <Button key={`lead-${entry.key}`} label="Set as lead" onPress={() => pickLead($, entry.key)} />
+                      )}
+                    </Box>
+                  )}
                 </Box>
               ))}
             </Box>

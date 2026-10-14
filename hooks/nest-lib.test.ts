@@ -11,6 +11,7 @@ import {
   CELEBRATE_MS,
   DAILY_EGGS,
   drawBoxTile,
+  drawPortrait,
   drawNest,
   eggSprite,
   eggsOf,
@@ -570,4 +571,18 @@ test('기운 알도 외곽선에 구멍이 없고 바닥이 둥지에 닿으며 
 test('금 간 알은 기울어도 금이 보인다', () => {
   expect(eggSprite('egg-1', 'cracked', 25).some(row => row.includes('c'))).toBe(true)
   expect(eggSprite('egg-1', 'cracked', -25).some(row => row.includes('c'))).toBe(true)
+})
+
+test('원본 그림은 줄이지 않고 반 블록으로 그린다', () => {
+  const sizes: number[] = []
+  const big: SpriteLookup = (_, size) => {
+    sizes.push(size)
+    return { width: 30, height: 24, px: Array.from({ length: 30 * 24 }, () => 0x123456) }
+  }
+  const portrait = drawPortrait(25, big)!
+  expect(portrait.columns).toBe(30)
+  expect(portrait.rows).toBe(12)
+  expect(portrait.cells.length).toBe(30 * 12 * 3)
+  expect(sizes[0]).toBeGreaterThanOrEqual(40)
+  expect(drawPortrait(25, () => undefined)).toBe(null)
 })

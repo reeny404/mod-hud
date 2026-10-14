@@ -9,7 +9,7 @@ const entry = (key: string, species: number, at: number): BoxEntry => ({ key, sp
 
 test('옆에 붙은 패널은 PC BOX 머리줄에 앞장선 포켓몬과 경험치를 보이고 칸마다 그림을 그린다', async ($, on) => {
   mock.clock(on, { now: NOW })
-  const dex: Pokedex = { ...emptyPokedex(), box: [entry('a', 19, 1), entry('b', 6, 2)], lead: 'a', xp: 0 }
+  const dex: Pokedex = { ...emptyPokedex(), box: [entry('a', 19, 1), entry('b', 6, 2), entry('c', 16, 3)], lead: 'a', xp: 0 }
   on('env.get', () => ({ value: '/home/test' }))
   on('fs.exists', ($, e) => ({ value: (e as unknown as { path: string }).path.endsWith('mod-hud-pokedex.json') }))
   on('fs.list', () => ({ value: [] }))
@@ -19,7 +19,7 @@ test('옆에 붙은 패널은 PC BOX 머리줄에 앞장선 포켓몬과 경험�
       return { value: JSON.stringify(dex) }
     }
     if (path.endsWith('names-en.json')) {
-      return { value: JSON.stringify({ 19: 'Rattata', 6: 'Charizard' }) }
+      return { value: JSON.stringify({ 19: 'Rattata', 20: 'Raticate', 6: 'Charizard', 16: 'Pidgey', 17: 'Pidgeotto' }) }
     }
     throw new Error('ENOENT')
   })
@@ -44,5 +44,11 @@ test('옆에 붙은 패널은 PC BOX 머리줄에 앞장선 포켓몬과 경험�
   expect(await pane.find({ type: 'Raster', key: 'tile-3' } as never)).toBeUndefined()
   // 진화할 수 있는 포켓몬이 있으면 앞장을 고르는 버튼이 있다
   expect(await pane.find({ type: 'Button', label: 'Lead ▶' } as never)).toBeDefined()
+  // 칸마다 마우스를 올리면 뜨는 카드가 있다. 진화할 수 있고 앞장이 아닌 포켓몬에만 앞장세우기 버튼이 있다
+  expect(await pane.find({ type: 'Text', text: /→ Raticate/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /→ Pidgeotto/ })).toBeDefined()
+  expect(await pane.find({ type: 'Button', key: 'lead-c' } as never)).toBeDefined()
+  expect(await pane.find({ type: 'Button', key: 'lead-a' } as never)).toBeUndefined()
+  expect(await pane.find({ type: 'Button', key: 'lead-b' } as never)).toBeUndefined()
   await pane.unmount()
 })
