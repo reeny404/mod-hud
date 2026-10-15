@@ -267,7 +267,12 @@ export function crop(image: Pixels): Pixels {
   return { width, height, px }
 }
 
+// 이보다 어두운 색은 테두리로 본다
+const OUTLINE_LUMA = 60
+const lumaOf = (color: number) => ((color >> 16) & 255) * 0.3 + ((color >> 8) & 255) * 0.59 + (color & 255) * 0.11
+
 // 비율을 지켜 size 안에 들어가게 줄인다. 칸마다 반 넘게 차 있으면 가장 많은 색으로 칠한다
+// 큰 포켓몬을 크게 줄이면 가는 테두리가 몸 색에 묻혀 뭉개지므로, 칸에 테두리가 넉넉히 있으면 테두리를 먼저 남긴다
 export function fit(image: Pixels, size: number): Pixels {
   const scale = Math.max(1, Math.max(image.width, image.height) / size)
   const width = Math.max(1, Math.round(image.width / scale))
@@ -281,23 +286,35 @@ export function fit(image: Pixels, size: number): Pixels {
       const y1 = Math.max(y0 + 1, Math.floor((ty + 1) * scale))
       const seen = new Map<number, number>()
       let filled = 0
+      let dark = 0
+      let darkest = CLEAR
       for (let y = y0; y < y1 && y < image.height; y++) {
         for (let x = x0; x < x1 && x < image.width; x++) {
           const color = image.px[y * image.width + x]!
           if (color !== CLEAR) {
             filled += 1
             seen.set(color, (seen.get(color) ?? 0) + 1)
+            if (lumaOf(color) < OUTLINE_LUMA) {
+              dark += 1
+              darkest = darkest === CLEAR || lumaOf(color) < lumaOf(darkest) ? color : darkest
+            }
           }
         }
       }
-      if (filled * 2 < (x1 - x0) * (y1 - y0)) {
+      const area = (x1 - x0) * (y1 - y0)
+      if (dark * 3 >= area) {
+        px.push(darkest)
+        continue
+      }
+      if (filled * 2 < area) {
         px.push(CLEAR)
         continue
       }
+      // 테두리가 조금 걸친 칸은 몸 색으로 칠한다
       let best = CLEAR
       let most = 0
       for (const [color, count] of seen) {
-        if (count > most) {
+        if (lumaOf(color) >= OUTLINE_LUMA && count > most) {
           best = color
           most = count
         }

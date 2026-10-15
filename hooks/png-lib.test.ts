@@ -34,3 +34,12 @@ test('비율을 지켜 정한 크기 안으로 줄인다', () => {
   // 이미 작으면 키우지 않는다
   expect(fit({ width: 2, height: 1, px: [1, 2] }, 12)).toEqual({ width: 2, height: 1, px: [1, 2] })
 })
+
+test('크게 줄여도 칸에 테두리가 넉넉히 있으면 몸 색보다 테두리를 남긴다', () => {
+  const [ink, body] = [0x202020, 0xf08030]
+  // 3x3 칸 하나에 테두리 세 점과 몸 색 여섯 점
+  const image = { width: 3, height: 3, px: [ink, body, body, ink, body, body, ink, body, body] }
+  expect(fit(image, 1).px).toEqual([ink])
+  // 테두리가 한 점만 걸치면 몸 색으로 칠한다
+  expect(fit({ width: 3, height: 3, px: [ink, body, body, body, body, body, body, body, body] }, 1).px).toEqual([body])
+})
