@@ -195,3 +195,61 @@ test('다른 세션이 조금 전에 적은 진화도 이 패널이 처음 보�
   expect(nodes(await pane.drawn(), 'Raster', { key: 'daycare', rows: 6 }).length).toBe(1)
   await pane.unmount()
 })
+
+test('몬스터볼을 누르면 기록을 쓰는 세션을 기다리지 않고 잡는 장면을 바로 보이고, 나중에 기록된 잡는 장면은 다시 보이지 않는다', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  let dex: Pokedex = { ...emptyPokedex(), box: [entry('b', 6, 2)], lead: 'b', chosen: true, xp: 0, encounter: { species: 146, at: NOW - 120_000, root: '/p/a', branch: null, label: 'b' } }
+  const written: string[] = []
+  on('env.get', () => ({ value: '/home/test' }))
+  on('fs.exists', ($, e) => ({ value: (e as unknown as { path: string }).path.endsWith('mod-hud-pokedex.json') }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.read', ($, e) => {
+    const path = (e as unknown as { path: string }).path
+    if (path.endsWith('mod-hud-pokedex.json')) {
+      return { value: JSON.stringify(dex) }
+    }
+    if (path.endsWith('names-en.json')) {
+      return { value: JSON.stringify({ 6: 'Charizard', 146: 'Moltres' }) }
+    }
+    throw new Error('ENOENT')
+  })
+  on('fs.write', ($, e) => {
+    const { path, text } = e as unknown as { path: string; text: string }
+    if (path.endsWith('mod-hud-encounter')) {
+      written.push(text)
+    }
+    return { value: undefined }
+  })
+  on('http.fetch', () => ({ value: { ok: false, status: 404, text: '' } }) as never)
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('command.register', () => ({ value: { name: 'x' } }) as never)
+  on('session.id', () => ({ value: 'self' }))
+  on('session.cwd', () => ({ value: '/p/a' }))
+  on('session.repo', () => ({ value: null }))
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.blit', () => ({ value: { deny: false } }) as never)
+  on('session.start', ($, e) => e as never)
+  await $.session.start({ source: 'startup', cwd: '/p/a' } as never)
+
+  const props = { placement: 'dock', bodyColumns: 60, scroll: { bodyRows: 60 } }
+  const pane = await $.ui.mount({ plugin: 'mod-hud', surface: 'terminal', component: 'Pane', requestId: 'mod-hud', props } as never)
+  expect(nodes(await pane.drawn(), 'Raster', { key: 'arrival' }).length).toBe(0)
+  await pane.press({ key: 'encounter-throw' })
+  // 이 세션은 기록을 쓰지 않지만 잡는 장면이 바로 뜨고 버튼은 걷힌다
+  expect(written).toEqual(['throw'])
+  let tree = await pane.drawn()
+  expect(nodes(tree, 'Raster', { key: 'arrival' }).length).toBe(1)
+  expect(nodes(tree, 'Button', { key: 'encounter-throw' }).length).toBe(0)
+  // 장면이 끝나도 기록에 반영될 때까지 버튼은 다시 나오지 않는다
+  await clock.advance(10_000)
+  tree = await pane.drawn()
+  expect(nodes(tree, 'Raster', { key: 'arrival' }).length).toBe(0)
+  expect(nodes(tree, 'Button', { key: 'encounter-throw' }).length).toBe(0)
+  // 기록을 쓰는 세션이 잡았다고 적어도 같은 장면을 다시 보이지 않는다
+  dex = { ...dex, box: [entry('legend:146', 146, NOW + 12_000), ...dex.box], legends: [146], encounter: null, scene: { kind: 'catch', species: 146, at: NOW + 12_000 } }
+  await clock.advance(30_000)
+  tree = await pane.drawn()
+  expect(nodes(tree, 'Raster', { key: 'arrival' }).length).toBe(0)
+  expect(await pane.find({ type: 'Text', text: /^2$/ })).toBeDefined()
+  await pane.unmount()
+})

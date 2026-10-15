@@ -680,6 +680,12 @@ async function answerEncounter($: EngineInterface, action: EncounterAction) {
   if (!home) {
     return
   }
+  if (action === 'throw' && wild && thrown !== wild.species) {
+    thrown = wild.species
+    arrivalShown = { kind: 'catch', species: wild.species, at: await $.clock.now(), name: wild.name }
+    wild = null
+    $.ui.invalidate('ui.render')
+  }
   await $.fs.write(`${home}/${ENCOUNTER_FILE}`, action)
   void refreshSessions($)
 }
@@ -931,6 +937,9 @@ const ARRIVAL_PART = { appear: { from: 0, length: 16 }, catch: { from: 16, lengt
 const ARRIVAL_COLUMNS = 60
 // 지금 나타나 있는 야생 전설과 놓친 전설의 이름
 let wild: { species: number; name: string } | null = null
+// 이 패널에서 몬스터볼을 던진 전설. 기록을 쓰는 세션은 30초마다 요청을 읽으므로, 그 전에 잡는 장면을 먼저 보이고 버튼을 걷는다
+// 기록에 그 전설의 잡는 장면이 적히면 다시 보이지 않는다
+let thrown: number | null = null
 let gone: string | null = null
 
 // 지금 보일 등장 장면의 걸음. 끝났으면 null
@@ -1499,13 +1508,23 @@ export const register: Register = (on, options) => {
       // 막 온 전설을 처음 보면 이 세션의 시각부터 등장 장면을 센다
       if (dex.scene && dex.scene.at !== arrivalSeen && now - dex.scene.at < EVOLVING_FRESH_MS) {
         arrivalSeen = dex.scene.at
-        // 진화 장면을 보이는 중이면 그 장면이 끝난 뒤 전설이 나타난다
-        const after = evolving && dex.scene.kind === 'appear' ? evolvingSeenAt + EVOLVE_MS : now
-        const name = await shownName($, home, dex.scene.species)
-        arrivalShown = { kind: dex.scene.kind, species: dex.scene.species, at: Math.max(now, after), name }
-        void loadSprite($, dex.scene.species)
+        // 이 패널에서 던져 잡는 장면을 이미 보였으면 다시 보이지 않는다
+        if (!(dex.scene.kind === 'catch' && dex.scene.species === thrown)) {
+          // 진화 장면을 보이는 중이면 그 장면이 끝난 뒤 전설이 나타난다
+          const after = evolving && dex.scene.kind === 'appear' ? evolvingSeenAt + EVOLVE_MS : now
+          const name = await shownName($, home, dex.scene.species)
+          arrivalShown = { kind: dex.scene.kind, species: dex.scene.species, at: Math.max(now, after), name }
+          void loadSprite($, dex.scene.species)
+        }
       }
-      wild = dex.encounter ? { species: dex.encounter.species, name: await shownName($, home, dex.encounter.species) } : null
+      // 던진 요청이 기록에 반영돼 야생 전설이 사라지면 던진 것도 잊는다
+      if (dex.encounter?.species !== thrown) {
+        thrown = null
+      }
+      wild =
+        dex.encounter && dex.encounter.species !== thrown
+          ? { species: dex.encounter.species, name: await shownName($, home, dex.encounter.species) }
+          : null
       gone = dex.fled ? await shownName($, home, dex.fled.species) : null
       if (dex.encounter) {
         void loadSprite($, dex.encounter.species)
