@@ -65,7 +65,7 @@ test('옆에 붙은 패널은 DAY CARE 머리줄에 맡긴 포켓몬과 경험�
   on('session.start', ($, e) => e as never)
   await $.session.start({ source: 'startup', cwd: '/p/a' } as never)
 
-  const props = { placement: 'dock', bodyColumns: 60, scroll: { bodyRows: 60 } }
+  const props = { placement: 'dock', bodyColumns: 66, scroll: { bodyRows: 60 } }
   const pane = await $.ui.mount({ plugin: 'mod-hud', surface: 'terminal', component: 'Pane', requestId: 'mod-hud', props } as never)
   expect(await pane.find({ type: 'Text', text: /PC BOX/ })).toBeDefined()
   // 키우미집에 맡겨 키우는 포켓몬과 경험치는 DAY CARE 머리줄에 보이고 PC BOX 머리줄에는 없다
@@ -74,7 +74,7 @@ test('옆에 붙은 패널은 DAY CARE 머리줄에 맡긴 포켓몬과 경험�
   const tree0 = () => drawnNow
   expect(header('daycare-toggle')).toContain('★ Rattata ░░░░░ 3h0m')
   expect(header('box-toggle')).not.toContain('Rattata')
-  // 폭 60 은 한 줄에 세 칸이고, 빈 칸도 벽으로 그린다
+  // 폭 66 은 한 줄에 세 칸이고, 빈 칸도 벽으로 그린다
   expect(nodes(await pane.drawn(), 'Raster', { key: 'tile-2' }).length).toBe(1)
   expect(nodes(await pane.drawn(), 'Raster', { key: 'tile-3' }).length).toBe(0)
   // 키우미집에 맡길 포켓몬은 마우스 카드의 Leave at DAY CARE 로만 고르고, 박스 아래 앞장 버튼은 없다
@@ -91,13 +91,13 @@ test('옆에 붙은 패널은 DAY CARE 머리줄에 맡긴 포켓몬과 경험�
   expect(centered.some(box => nodes(box, 'Button', { key: 'lead-c' }).length === 1)).toBe(true)
   expect(nodes(tree, 'Button', { key: 'lead-a' }).length).toBe(0)
   expect(nodes(tree, 'Button', { key: 'lead-b' }).length).toBe(0)
-  // 카드는 패널 안에 들어가게 놓는다. 폭 60, 칸 16 이면 세 칸이 가운데 정렬돼 6, 22, 38 에 있고 카드 폭은 42 다
-  expect(nodes(tree, 'Box', { backgroundColor: '#202020' }).map(card => card.props?.left)).toEqual([-6, -13, -20])
+  // 카드는 패널 안에 들어가게 놓는다. 폭 66, 칸 22 면 세 칸이 0, 22, 44 에 있고 카드 폭은 42 다
+  expect(nodes(tree, 'Box', { backgroundColor: '#202020' }).map(card => card.props?.left)).toEqual([0, -10, -20])
   // 카드는 아래 화면이 비치지 않게 배경을 칠하고 가운데 정렬한다
   expect(nodes(tree, 'Box', { backgroundColor: '#202020', alignItems: 'center' }).length).toBe(3)
   // DAY CARE 머리줄을 누르면 풀밭을 접고 남은 알 수만 남긴다. 다시 누르면 편다
   // 앞장선 포켓몬이 걸을 수 있게 풀밭이 높아진다
-  expect(nodes(await pane.drawn(), 'Raster', { key: 'daycare', rows: 6 }).length).toBe(1)
+  expect(nodes(await pane.drawn(), 'Raster', { key: 'daycare', rows: 11 }).length).toBe(1)
   await pane.press({ key: 'daycare-toggle' })
   expect(nodes(await pane.drawn(), 'Raster', { key: 'daycare' }).length).toBe(0)
   // 접어도 머리줄의 남은 알 수와 맡긴 포켓몬의 경험치는 남는다
@@ -141,7 +141,7 @@ test('최종 진화형이 맡겨져 있으면 MAX 로 보이고 Take back 버튼
   on('session.start', ($, e) => e as never)
   await $.session.start({ source: 'startup', cwd: '/p/a' } as never)
 
-  const props = { placement: 'dock', bodyColumns: 60, scroll: { bodyRows: 60 } }
+  const props = { placement: 'dock', bodyColumns: 66, scroll: { bodyRows: 60 } }
   const pane = await $.ui.mount({ plugin: 'mod-hud', surface: 'terminal', component: 'Pane', requestId: 'mod-hud', props } as never)
   const tree = await pane.drawn()
   expect(nodes(tree, 'Button', { key: 'daycare-toggle' }).map(textOf).join('')).toContain('★ Charizard MAX')
@@ -192,7 +192,7 @@ test('다른 세션이 조금 전에 적은 진화도 이 패널이 처음 보�
   // 기록을 쓰는 세션이 20초 전에 적은 진화라도 이 패널은 처음 보므로 넘겨서 깜빡인다
   expect(await pane.find({ type: 'Text', text: /PC BOX  2\/2/ })).toBeDefined()
   // 최종 진화형이 되어 맡긴 포켓몬이 풀려도, 진화 장면을 보이는 동안은 풀밭에 그 포켓몬이 서 있다
-  expect(nodes(await pane.drawn(), 'Raster', { key: 'daycare', rows: 6 }).length).toBe(1)
+  expect(nodes(await pane.drawn(), 'Raster', { key: 'daycare', rows: 11 }).length).toBe(1)
   await pane.unmount()
 })
 

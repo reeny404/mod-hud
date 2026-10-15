@@ -472,15 +472,15 @@ test('스프라이트를 불러오면 몬스터볼 대신 그 그림을 그린�
   expect(Array.from(withDot).includes(0x123456)).toBe(true)
 })
 
-test('박스 칸은 14점 아이콘을 그리고 앞장이면 별을 단다', () => {
+test('박스 칸은 20점 아이콘을 그리고 앞장이면 별을 단다', () => {
   const sizes: number[] = []
   const big: SpriteLookup = (_, size) => {
     sizes.push(size)
     return { width: 1, height: 1, px: [0x123456] }
   }
   const plain = drawBoxTile(dexEgg('k'), false, null, 0, NOW, big)
-  expect(sizes).toEqual([14])
-  expect(TILE).toBe(16)
+  expect(sizes).toEqual([20])
+  expect(TILE).toBe(22)
   expect(plain.length).toBe(TILE * (TILE / 2) * 3)
   const lead = drawBoxTile(dexEgg('k'), true, null, 0, NOW, big)
   expect(Array.from(plain).includes(LEAD_STAR)).toBe(false)
@@ -528,19 +528,21 @@ test('키우미집 풀밭은 알이 0개여도 네 줄로 그리고, 맡긴 알�
 })
 
 test('박스는 한 페이지에 한 줄이고 넘치면 페이지를 나눈다', () => {
-  // 폭 60 은 한 줄에 세 마리
+  // 폭 66 은 한 줄에 세 마리
   const box = Array.from({ length: 7 }, (_, i) => ({ ...dexEgg(`k${i}`), species: i + 1 }))
   const first = { eggs: [], daycare: [], box, boxPage: 0 }
-  expect(boxPerRow(60)).toBe(3)
-  expect(boxPages(first, 60)).toBe(3)
-  expect(boxOnPage(first, 60).map(entry => entry.species)).toEqual([1, 2, 3])
-  expect(speciesToLoad(first, 60)).toEqual([1, 2, 3])
-  expect(speciesToLoad({ ...first, boxPage: 2 }, 60)).toEqual([7])
-  expect(boxPageOfKey(first, 60, 'k4')).toBe(1)
+  expect(boxPerRow(66)).toBe(3)
+  // 폭 60 은 두 마리
+  expect(boxPerRow(60)).toBe(2)
+  expect(boxPages(first, 66)).toBe(3)
+  expect(boxOnPage(first, 66).map(entry => entry.species)).toEqual([1, 2, 3])
+  expect(speciesToLoad(first, 66)).toEqual([1, 2, 3])
+  expect(speciesToLoad({ ...first, boxPage: 2 }, 66)).toEqual([7])
+  expect(boxPageOfKey(first, 66, 'k4')).toBe(1)
   // 박스가 줄어 페이지가 사라지면 마지막 페이지로 당긴다
-  expect(boxPageOf({ ...first, boxPage: 5 }, 60)).toBe(2)
+  expect(boxPageOf({ ...first, boxPage: 5 }, 66)).toBe(2)
   // 막 진화한 칸이 이 페이지에 있으면 진화 전 그림도 불러온다
-  expect(speciesToLoad({ ...first, evolving: { key: 'k1', from: 99, at: NOW } }, 60)).toEqual([1, 2, 3, 99])
+  expect(speciesToLoad({ ...first, evolving: { key: 'k1', from: 99, at: NOW } }, 66)).toEqual([1, 2, 3, 99])
 })
 test('금 간 알은 알마다 다섯 가지 금 중 하나로 그리고, 같은 알은 늘 같은 금이다', () => {
   const crackOf = (key: string) =>

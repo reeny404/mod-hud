@@ -31,8 +31,8 @@ export type SpriteLookup = (species: number, size: number) => Pixels | undefined
 
 // 박스 아이콘 도트는 대부분 이보다 작아 줄이지 않고 그대로 그린다. 정수 배가 아니게 줄이면 도트가 뭉개져 더 줄이지 않는다
 export const HATCHED_SIZE = 24
-// 박스 아이콘은 이 안에 들어가게 줄인다. 큰 포켓몬이 박스를 너무 차지하지 않게 한다
-export const ICON_SIZE = 14
+// 박스 아이콘은 이 안에 들어가게 줄인다. 큰 포켓몬(원본 32점 남짓)을 이보다 작게 줄이면 눈과 팔다리가 사라진다
+export const ICON_SIZE = 20
 // 막 진화한 박스 칸이 진화 전과 뒤 그림을 번갈아 그리는 시간
 export const EVOLVE_MS = 4000
 // 부화한 뒤 높이 뛰며 반짝이는 시간
@@ -52,7 +52,7 @@ const EGG_ROWS = 8
 const HATCHED_SLOT = 24
 const HATCHED_ROWS = 14
 // 박스 한 칸. 한 페이지는 한 줄이고 넘치면 페이지를 넘겨 본다
-export const TILE = 16
+export const TILE = 22
 export const TILE_ROWS = TILE / 2
 
 const UPPER_HALF = 0x2580
@@ -999,10 +999,10 @@ export function nestRows(input: NestInput, width: number): number {
   return layout.reduce((sum, row) => sum + row.rows + 1, 0) + (layout.length > 0 ? 1 : 0)
 }
 
-// 앞장선 포켓몬이 풀밭을 걸으면 풀밭이 이만큼 높아진다
-const WALK_GROUND_ROWS = 6
-// 풀밭을 걷는 포켓몬의 크기. 풀밭 높이에 맞춰 박스 아이콘보다 작다
-export const WALKER_SIZE = 11
+// 앞장선 포켓몬이 풀밭을 걸으면 풀밭이 이만큼 높아진다. 걷는 포켓몬과 통통 튀는 한 칸이 들어간다
+const WALK_GROUND_ROWS = 11
+// 풀밭을 걷는 포켓몬의 크기. 더 작으면 큰 포켓몬이 뭉개져 박스 아이콘과 같게 둔다
+export const WALKER_SIZE = ICON_SIZE
 // 걷는 포켓몬이 통통 튀는 높이. 두 프레임마다 한 칸 뛴다
 const STEP_HOP = [0, 1, 1, 0]
 
