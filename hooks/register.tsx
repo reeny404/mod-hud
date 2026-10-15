@@ -663,9 +663,13 @@ async function sendToBox($: EngineInterface, key: string) {
   const dir = `${home}/${SENDBOX_DIR}`
   await $.process.run(['mkdir', '-p', dir])
   await $.fs.write(`${dir}/${key}`, '')
-  // 기록을 쓰는 세션이 다음 조회 때 넣으므로, 그동안 이 패널에서는 바로 빼 둔다
+  // 기록을 쓰는 세션이 다음 조회 때 넣으므로, 그동안 이 패널에서는 바로 빼 두고 토스트도 여기서 띄운다
   sending.add(key)
+  const egg = (await read($, eggs)).find(egg => egg.key === key)
   await update($, eggs, prev => prev.filter(egg => egg.key !== key))
+  if (egg) {
+    $.ui.toast(`${await pokemonName($, home, egg.species)} was sent to the PC BOX (${egg.label})`)
+  }
   void refreshSessions($)
 }
 
@@ -756,7 +760,8 @@ async function keepPokedex($: EngineInterface, sessions: SessionStatus[], now: n
     for (const egg of advanced.born) {
       $.ui.toast(`Your ${egg.label} egg hatched into ${await pokemonName($, home, egg.species)}!`)
     }
-    for (const egg of advanced.boxed) {
+    // 이 패널에서 보낸 알은 누를 때 이미 토스트를 띄웠다
+    for (const egg of advanced.boxed.filter(egg => !sending.has(egg.key))) {
       $.ui.toast(`${await pokemonName($, home, egg.species)} was sent to the PC BOX (${egg.label})`)
     }
     for (const egg of advanced.left) {

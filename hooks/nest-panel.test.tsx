@@ -259,6 +259,7 @@ test('박스로 보내기를 누르면 기록을 쓰는 세션을 기다리지 �
   const hatchedEgg = { key: 'egg1', species: 13, root: '/p/a', branch: 'feat/x', label: 'feat/x', at: NOW - 1000 }
   let dex: Pokedex = { ...emptyPokedex(), pending: [{ ...hatchedEgg, mrState: 'merged' }], hatched: { egg1: NOW - 1000 } }
   const written: string[] = []
+  const toasts: string[] = []
   on('env.get', () => ({ value: '/home/test' }))
   on('fs.exists', ($, e) => ({ value: (e as unknown as { path: string }).path.endsWith('mod-hud-pokedex.json') }))
   on('fs.list', () => ({ value: [] }))
@@ -287,6 +288,10 @@ test('박스로 보내기를 누르면 기록을 쓰는 세션을 기다리지 �
   on('session.repo', () => ({ value: null }))
   on('ui.panes', () => ({ value: [] }))
   on('ui.blit', () => ({ value: { deny: false } }) as never)
+  on('ui.toast', ($, e) => {
+    toasts.push((e as unknown as { text: string }).text)
+    return { value: undefined }
+  })
   on('session.start', ($, e) => e as never)
   await $.session.start({ source: 'startup', cwd: '/p/a' } as never)
 
@@ -294,8 +299,9 @@ test('박스로 보내기를 누르면 기록을 쓰는 세션을 기다리지 �
   const pane = await $.ui.mount({ plugin: 'mod-hud', surface: 'terminal', component: 'Pane', requestId: 'mod-hud', props } as never)
   expect(nodes(await pane.drawn(), 'Button', { key: 'send-egg1' }).length).toBe(1)
   await pane.press({ key: 'send-egg1' })
-  // 이 세션은 기록을 쓰지 않지만 요청을 남기고 버튼은 바로 걷힌다
+  // 이 세션은 기록을 쓰지 않지만 요청을 남기고 토스트를 띄우며 버튼은 바로 걷힌다
   expect(written).toEqual(['/home/test/.claude/mod-hud-sendbox/egg1'])
+  expect(toasts).toEqual(['Weedle was sent to the PC BOX (feat/x)'])
   expect(nodes(await pane.drawn(), 'Button', { key: 'send-egg1' }).length).toBe(0)
   // 기록을 쓰는 세션이 아직 반영하지 않아도 다음 조회에서 버튼이 되살아나지 않는다
   await clock.advance(30_000)
