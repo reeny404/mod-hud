@@ -44,7 +44,7 @@ import {
   parseWorktrees,
   readEnvValue,
 } from './issues-lib'
-import { canEvolve } from './dex-data'
+import { canEvolve, typesOf } from './dex-data'
 import { advanceEvolution, TAKE_BACK, xpBar, xpLeft } from './evolve-lib'
 import { helpText, isHelp } from './help-lib'
 import type { EncounterAction } from './evolve-lib'
@@ -56,10 +56,8 @@ import {
   boxPageOf,
   boxPageOfKey,
   boxPages,
-  boxPerRow,
   daycareGroundRows,
   drawArrival,
-  drawBoxTile,
   drawDaycareGround,
   drawNest,
   drawPortrait,
@@ -72,8 +70,6 @@ import {
   nestRows,
   parsePokedex,
   speciesToLoad,
-  TILE,
-  TILE_ROWS,
   updatePending,
   WALKER_SIZE,
 } from './nest-lib'
@@ -611,7 +607,7 @@ async function refreshIssues($: EngineInterface, isForced: boolean) {
 const POKEDEX_FILE = '.claude/mod-hud-pokedex.json'
 // 박스로 보내기 요청. 어느 세션에서 눌러도 알 key 이름의 빈 파일을 두고, 기록을 쓰는 세션이 읽어 박스에 넣은 뒤 지운다
 const SENDBOX_DIR = '.claude/mod-hud-sendbox'
-// 앞장세우기 요청. 어느 세션에서 눌러도 박스 칸 key 를 이 파일에 쓰고, 기록을 쓰는 세션이 읽어 반영한 뒤 지운다
+// 앞장세우기 요청. 어느 세션에서 눌러도 박스 key 를 이 파일에 쓰고, 기록을 쓰는 세션이 읽어 반영한 뒤 지운다
 const LEAD_FILE = '.claude/mod-hud-lead'
 // 야생 전설에게 누른 버튼(throw, run, dismiss). 어느 세션에서 눌러도 이 파일에 쓰고, 기록을 쓰는 세션이 읽어 반영한 뒤 지운다
 const ENCOUNTER_FILE = '.claude/mod-hud-encounter'
@@ -979,13 +975,10 @@ let boxCollapsed = false
 let daycareRowsDrawn = 0
 // 키우미집을 접었는지. 접으면 머리줄의 맡긴 포켓몬 경험치와 남은 알 수만 보인다
 let daycareCollapsed = false
-// 박스 칸에 마우스를 올리면 뜨는 카드의 글자. 칸 key 로 찾는다
-let boxCards = new Map<string, { name: string; caught: string; canLead: boolean }>()
-// 카드 폭. 원본 아이콘 40칸과 테두리
-const CARD_COLUMNS = 42
-// 카드는 아래 화면 위에 겹쳐 뜨므로 빈 칸까지 이 색으로 칠해 비치지 않게 한다
-const CARD_BACKGROUND = 0x202020
-const CARD_BACKGROUND_HEX = '#202020'
+// 이번 박스 페이지의 줄마다 보일 이름과 속성. 박스 key 로 찾는다
+let boxRows = new Map<string, { name: string; types: string; caught: string; canLead: boolean }>()
+// 눌러 펼친 박스 줄의 key. 펼친 줄 아래에 잡은 날짜와 어디서 왔는지, 키우미집 버튼이 보인다
+let boxOpen: string | null = null
 let nestFrame = 0
 // 그림이 보일 때만 돈다. 패널이 닫히거나 입력창 위로 옮겨 칠할 곳이 없으면 멈춘다
 let nestTimer: ReturnType<EngineInterface['clock']['every']> | null = null
@@ -1023,26 +1016,6 @@ function daycareCells(scene: { columns: number; input: NestInput }, now: number)
   return base64Of(drawDaycareGround(scene.input.daycare, scene.columns, nestFrame, walker, before))
 }
 
-// 이번 박스 페이지의 칸. 한 줄을 늘 꽉 채워 그리고, 포켓몬이 없는 칸은 null 이다
-function boxTiles(scene: { columns: number; input: NestInput }) {
-  const page = boxOnPage(scene.input, scene.columns)
-  return Array.from({ length: boxPerRow(scene.columns) }, (_, i) => page[i] ?? null)
-}
-
-function tileCells(scene: { columns: number; input: NestInput }, entry: BoxEntry | null, now: number): string {
-  const { lead = null, evolving = null } = scene.input
-  return base64Of(drawBoxTile(entry, entry !== null && entry.key === lead, evolving, nestFrame, now, lookupSprite))
-}
-
-// 마우스 카드의 폭과 칸 기준 왼쪽 위치. 칸 가운데에 두되 패널 밖으로 나가지 않게 당긴다. 칸 줄은 가운데 정렬이다
-function cardPlace(columns: number, i: number): { width: number; left: number } {
-  const width = Math.min(CARD_COLUMNS, columns)
-  const tileX = Math.floor((columns - boxPerRow(columns) * TILE) / 2) + i * TILE
-  const centered = Math.floor((TILE - width) / 2)
-  // -tileX 는 tileX 가 0 일 때 -0 이 되어 0 - tileX 로 쓴다
-  return { width, left: Math.max(0 - tileX, Math.min(centered, columns - width - tileX)) }
-}
-
 function startNest($: EngineInterface) {
   nestDenied = 0
   nestTimer ??= $.clock.every(NEST_TICK_MS, () => void tickNest($))
@@ -1059,8 +1032,8 @@ function turnBox($: EngineInterface, delta: number) {
   if (!nestScene) {
     return
   }
-  const pages = boxPages(nestScene.input, nestScene.columns)
-  boxPage = (boxPageOf(nestScene.input, nestScene.columns) + delta + pages) % pages
+  const pages = boxPages(nestScene.input)
+  boxPage = (boxPageOf(nestScene.input) + delta + pages) % pages
   $.ui.invalidate('ui.render')
 }
 
@@ -1092,15 +1065,6 @@ async function tickNest($: EngineInterface) {
     }
     if (!isPlaying && now >= arrivalShown.at) {
       arrivalShown = null
-    }
-  }
-  // 막 진화한 박스 칸만 깜빡이므로 그 칸만 다시 칠한다
-  const evolving = nestScene.input.evolving
-  if (evolving && now - evolving.at < EVOLVE_MS && !boxCollapsed) {
-    const tiles = boxTiles(nestScene)
-    const at = tiles.findIndex(entry => entry?.key === evolving.key)
-    if (at >= 0) {
-      await $.ui.blit({ requestId: PANE, key: `tile-${at}`, cells: tileCells(nestScene, tiles[at]!, now) })
     }
   }
   nestDenied = painted.some(one => one.deny) ? nestDenied + 1 : 0
@@ -1517,7 +1481,7 @@ export const register: Register = (on, options) => {
       if (dex.evolving && dex.evolving.at !== evolvingSeen && now - dex.evolving.at < EVOLVING_FRESH_MS) {
         evolvingSeen = dex.evolving.at
         evolvingSeenAt = now
-        boxPage = boxPageOfKey({ eggs: [], daycare: [], box: dex.box, boxPage }, columns, dex.evolving.key)
+        boxPage = boxPageOfKey({ eggs: [], daycare: [], box: dex.box, boxPage }, dex.evolving.key)
       }
       const evolving = dex.evolving && dex.evolving.at === evolvingSeen ? { ...dex.evolving, at: evolvingSeenAt } : null
       // 막 온 전설을 처음 보면 이 세션의 시각부터 등장 장면을 센다
@@ -1554,11 +1518,12 @@ export const register: Register = (on, options) => {
           ? `★ ${await shownName($, home, lead.species)} ${canEvolve(lead.species) ? `${xpBar(dex.xp)} ${xpLeft(dex.xp)}` : 'MAX'}`
           : null,
       }
-      boxCards = new Map()
-      for (const entry of boxOnPage(input, columns)) {
+      boxRows = new Map()
+      for (const entry of boxOnPage(input)) {
         // 다음 진화는 진화할 때까지 보이지 않는다
-        boxCards.set(entry.key, {
+        boxRows.set(entry.key, {
           name: await shownName($, home, entry.species),
+          types: typesOf(entry.species),
           caught: localDay(entry.at),
           canLead: canEvolve(entry.species) && entry.key !== dex.lead,
         })
@@ -1857,8 +1822,8 @@ export const register: Register = (on, options) => {
                 <Text bold color="#ffffff">
                   {boxCollapsed ? '▸' : '▾'} PC BOX
                   {!boxCollapsed &&
-                    boxPages(nestScene.input, nestScene.columns) > 1 &&
-                    `  ${boxPageOf(nestScene.input, nestScene.columns) + 1}/${boxPages(nestScene.input, nestScene.columns)}`}
+                    boxPages(nestScene.input) > 1 &&
+                    `  ${boxPageOf(nestScene.input) + 1}/${boxPages(nestScene.input)}`}
                 </Text>
               </Button>
               <Box flexGrow={1} />
@@ -1867,52 +1832,59 @@ export const register: Register = (on, options) => {
               </Text>
             </Box>
             {!boxCollapsed && (
-              <Box justifyContent="center">
-                {boxTiles(nestScene).map((entry, i) => (
-                  <Box key={`tile-${i}`}>
-                    <Raster key={`tile-${i}`} columns={TILE} rows={TILE_ROWS} cells={tileCells(nestScene!, entry, now)} />
-                    {entry && boxCards.has(entry.key) && (
-                      // 마우스를 올린 칸 위로 원본 크기 카드를 띄운다. 다른 줄을 밀어내지 않게 겹쳐 그린다
-                      <Box
-                        position="absolute"
-                        bottom={TILE_ROWS}
-                        left={cardPlace(nestScene!.columns, i).left}
-                        width={cardPlace(nestScene!.columns, i).width}
-                        display="none"
-                        hover={{ display: 'flex' }}
-                        flexDirection="column"
-                        alignItems="center"
-                        borderStyle="round"
-                        backgroundColor={CARD_BACKGROUND_HEX}
-                      >
-                        {(() => {
-                          const portrait = drawPortrait(entry.species, lookupSprite, CARD_BACKGROUND)
-                          return (
-                            portrait && (
-                              <Raster key={`portrait-${i}`} columns={portrait.columns} rows={portrait.rows} cells={base64Of(portrait.cells)} />
-                            )
-                          )
-                        })()}
-                        <Text bold>{boxCards.get(entry.key)!.name}</Text>
-                        <Text dimColor>caught {boxCards.get(entry.key)!.caught}</Text>
-                        {entry.key === nestScene!.input.lead && <Text color="#ffe080">{boxHeader.lead}</Text>}
-                        {boxCards.get(entry.key)!.canLead && (
-                          <Box justifyContent="center" width="100%">
-                            <Button key={`lead-${entry.key}`} label="Leave at DAY CARE" onPress={() => pickLead($, entry.key)} />
-                          </Box>
-                        )}
-                        {entry.key === nestScene!.input.lead && (
-                          <Box justifyContent="center" width="100%">
-                            <Button key={`takeback-${entry.key}`} label="Take back" onPress={() => pickLead($, TAKE_BACK)} />
-                          </Box>
-                        )}
+              // 원작 골드 버전의 PC BOX 처럼 한 줄에 한 마리씩 이름과 속성을 글자로 보인다. 줄을 누르면 펼친다
+              <Box flexDirection="column" width={nestScene.columns}>
+                {boxOnPage(nestScene.input).map(entry => {
+                  const row = boxRows.get(entry.key)
+                  if (!row) {
+                    return null
+                  }
+                  const isLead = entry.key === nestScene!.input.lead
+                  return (
+                    <Box key={`box-${entry.key}`} flexDirection="column">
+                      <Box paddingX={1}>
+                        <Box flexShrink={1}>
+                          <Button
+                            plain
+                            key={`box-row-${entry.key}`}
+                            onPress={() => {
+                              boxOpen = boxOpen === entry.key ? null : entry.key
+                              $.ui.invalidate('ui.render')
+                            }}
+                          >
+                            <Text wrap="truncate-end" color={isLead ? '#ffe080' : undefined}>
+                              {isLead ? '★ ' : '  '}
+                              {row.name.toUpperCase()}
+                              {row.types && <Text dimColor>  {row.types}</Text>}
+                            </Text>
+                          </Button>
+                        </Box>
+                        <Box flexGrow={1} />
+                        <Text dimColor>{row.caught.slice(5)}</Text>
                       </Box>
-                    )}
-                  </Box>
-                ))}
+                      {boxOpen === entry.key && (
+                        <Box flexDirection="column" paddingX={4}>
+                          <Text dimColor wrap="truncate-end">
+                            caught {row.caught} · {entry.label}
+                          </Text>
+                          {row.canLead && (
+                            <Box>
+                              <Button key={`lead-${entry.key}`} label="Leave at DAY CARE" onPress={() => pickLead($, entry.key)} />
+                            </Box>
+                          )}
+                          {isLead && (
+                            <Box>
+                              <Button key={`takeback-${entry.key}`} label="Take back" onPress={() => pickLead($, TAKE_BACK)} />
+                            </Box>
+                          )}
+                        </Box>
+                      )}
+                    </Box>
+                  )
+                })}
               </Box>
             )}
-            {!boxCollapsed && boxPages(nestScene.input, nestScene.columns) > 1 && (
+            {!boxCollapsed && boxPages(nestScene.input) > 1 && (
               <Box justifyContent="center">
                 <Button key="box-prev" label="◀ Prev" onPress={() => turnBox($, -1)} />
                 <Button key="box-next" label="Next ▶" onPress={() => turnBox($, 1)} />

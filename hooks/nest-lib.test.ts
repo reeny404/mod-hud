@@ -9,12 +9,11 @@ import {
   boxPageOf,
   boxPageOfKey,
   boxPages,
-  boxPerRow,
+  BOX_PER_PAGE,
   CELEBRATE_MS,
   DAILY_EGGS,
   DAYCARE_GROUND_ROWS,
   drawArrival,
-  drawBoxTile,
   daycareGroundRows,
   drawDaycareGround,
   drawPortrait,
@@ -22,21 +21,17 @@ import {
   eggSprite,
   eggsOf,
   emptyPokedex,
-  EVOLVE_MS,
   freshEggs,
   keeperOf,
-  LEAD_STAR,
   localDay,
   nestRows,
   parsePokedex,
   speciesOf,
   speciesToLoad,
-  TILE,
   updatePending,
 } from './nest-lib'
 import type { SpriteLookup } from './nest-lib'
 import { EGG_SPECIES } from './dex-data'
-import { CLEAR } from './png-lib'
 
 const ROOT = '/p/momochi'
 const NOW = 10 * 60 * 60 * 1000
@@ -439,11 +434,11 @@ test('브랜치를 적지 않은 옛 상태 파일의 MR 상태는 알을 깨는
   expect(advancePokedex(dexOf({ daycare: [held('next')] }), [legacy], NOW).dex.holds).toEqual({})
 })
 
-test('금 간 알과 부화한 알, 박스 이번 페이지의 포켓몬만 스프라이트를 불러온다', () => {
+test('금 간 알과 부화한 알만 스프라이트를 불러오고, 글자로 보이는 박스 포켓몬은 부르지 않는다', () => {
   const dex = dexOf({ holds: { a: held('a', 1), b: held('b', 2), c: held('c', 3) } })
   const eggs = eggsOf([session('a'), session('b', { mrState: 'opened' }), session('c', { mrState: 'merged' })], dex, NOW)
   const box = [dexEgg('k', { species: 150 })]
-  expect(speciesToLoad({ eggs, daycare: [], box, boxPage: 0 }, 80)).toEqual([eggs[1]!.species, eggs[2]!.species, 150])
+  expect(speciesToLoad({ eggs, daycare: [], box, boxPage: 0 }, 80)).toEqual([eggs[1]!.species, eggs[2]!.species])
 })
 
 test('알 그림은 알 줄 수만큼 칸을 채우고 프레임마다 움직인다', () => {
@@ -464,43 +459,6 @@ test('알 줄과 키우미집 그림에는 PC BOX 가 들어가지 않는다', (
   const full = { ...empty, box: Array.from({ length: 9 }, (_, i) => dexEgg(`k${i}`)) }
   expect(nestRows(full, 40)).toBe(nestRows(empty, 40))
   expect(drawNest(full, 40, 1, NOW, () => undefined)).toEqual(drawNest(empty, 40, 1, NOW, () => undefined))
-})
-test('스프라이트를 불러오면 몬스터볼 대신 그 그림을 그린다', () => {
-  const dot: SpriteLookup = () => ({ width: 1, height: 1, px: [0x123456] })
-  const withDot = drawBoxTile(dexEgg('k'), false, null, 0, NOW, dot)
-  expect(withDot).not.toEqual(drawBoxTile(dexEgg('k'), false, null, 0, NOW, () => undefined))
-  expect(Array.from(withDot).includes(0x123456)).toBe(true)
-})
-
-test('박스 칸은 20점 아이콘을 그리고 앞장이면 별을 단다', () => {
-  const sizes: number[] = []
-  const big: SpriteLookup = (_, size) => {
-    sizes.push(size)
-    return { width: 1, height: 1, px: [0x123456] }
-  }
-  const plain = drawBoxTile(dexEgg('k'), false, null, 0, NOW, big)
-  expect(sizes).toEqual([20])
-  expect(TILE).toBe(22)
-  expect(plain.length).toBe(TILE * (TILE / 2) * 3)
-  const lead = drawBoxTile(dexEgg('k'), true, null, 0, NOW, big)
-  expect(Array.from(plain).includes(LEAD_STAR)).toBe(false)
-  expect(Array.from(lead).includes(LEAD_STAR)).toBe(true)
-  // 빈 칸은 벽만 그린다
-  expect(Array.from(drawBoxTile(null, false, null, 0, NOW, big)).includes(0x123456)).toBe(false)
-})
-
-test('막 진화한 칸은 진화 전과 지금 그림을 번갈아 그리고 잠시 뒤 멈춘다', () => {
-  const bySpecies: SpriteLookup = species => ({ width: 1, height: 1, px: [species === 19 ? 0x111111 : 0x222222] })
-  const entry = dexEgg('k', { species: 20 })
-  const evolving = { key: 'k', from: 19, at: NOW }
-  const frames = [0, 1, 2, 3].map(frame => drawBoxTile(entry, false, evolving, frame, NOW, bySpecies))
-  expect(frames.some(cells => Array.from(cells).includes(0x111111))).toBe(true)
-  expect(frames.some(cells => Array.from(cells).includes(0x222222))).toBe(true)
-  const later = [0, 1, 2, 3].map(frame => drawBoxTile(entry, false, evolving, frame, NOW + EVOLVE_MS + 1, bySpecies))
-  expect(later.every(cells => Array.from(cells).includes(0x222222) && !Array.from(cells).includes(0x111111))).toBe(true)
-  // 다른 칸의 진화는 이 칸을 바꾸지 않는다
-  const other = drawBoxTile(dexEgg('o', { species: 20 }), false, evolving, 0, NOW, bySpecies)
-  expect(Array.from(other).includes(0x111111)).toBe(false)
 })
 test('빈 둥지는 둥지 바닥만 그리고 알은 그리지 않는다', () => {
   const nest = { key: 'a', label: 'a', species: 0, isShaking: false, activity: null, hatchedAt: null }
@@ -527,22 +485,17 @@ test('키우미집 풀밭은 알이 0개여도 네 줄로 그리고, 맡긴 알�
   expect(drawDaycareGround([held('d')], 40, 0)).not.toEqual(ground)
 })
 
-test('박스는 한 페이지에 한 줄이고 넘치면 페이지를 나눈다', () => {
-  // 폭 66 은 한 줄에 세 마리
-  const box = Array.from({ length: 7 }, (_, i) => ({ ...dexEgg(`k${i}`), species: i + 1 }))
+test('박스는 폭과 상관없이 한 페이지에 여섯 줄이고 넘치면 페이지를 나눈다', () => {
+  const box = Array.from({ length: 13 }, (_, i) => ({ ...dexEgg(`k${i}`), species: i + 1 }))
   const first = { eggs: [], daycare: [], box, boxPage: 0 }
-  expect(boxPerRow(66)).toBe(3)
-  // 폭 60 은 두 마리
-  expect(boxPerRow(60)).toBe(2)
-  expect(boxPages(first, 66)).toBe(3)
-  expect(boxOnPage(first, 66).map(entry => entry.species)).toEqual([1, 2, 3])
-  expect(speciesToLoad(first, 66)).toEqual([1, 2, 3])
-  expect(speciesToLoad({ ...first, boxPage: 2 }, 66)).toEqual([7])
-  expect(boxPageOfKey(first, 66, 'k4')).toBe(1)
+  expect(BOX_PER_PAGE).toBe(6)
+  expect(boxPages(first)).toBe(3)
+  expect(boxOnPage(first).map(entry => entry.species)).toEqual([1, 2, 3, 4, 5, 6])
+  expect(boxOnPage({ ...first, boxPage: 2 }).map(entry => entry.species)).toEqual([13])
+  expect(boxPageOfKey(first, 'k6')).toBe(1)
   // 박스가 줄어 페이지가 사라지면 마지막 페이지로 당긴다
-  expect(boxPageOf({ ...first, boxPage: 5 }, 66)).toBe(2)
-  // 막 진화한 칸이 이 페이지에 있으면 진화 전 그림도 불러온다
-  expect(speciesToLoad({ ...first, evolving: { key: 'k1', from: 99, at: NOW } }, 66)).toEqual([1, 2, 3, 99])
+  expect(boxPageOf({ ...first, boxPage: 5 })).toBe(2)
+  expect(boxPages({ ...first, box: [] })).toBe(1)
 })
 test('금 간 알은 알마다 다섯 가지 금 중 하나로 그리고, 같은 알은 늘 같은 금이다', () => {
   const crackOf = (key: string) =>
@@ -616,19 +569,6 @@ test('기운 알에는 한 칸짜리 돌기가 없다', () => {
       )
     }
   }
-})
-
-test('카드에 그리는 원본 그림은 빈 칸을 배경색으로 칠해 아래 화면이 비치지 않는다', () => {
-  const sparse: SpriteLookup = () => ({ width: 4, height: 3, px: [0x123456, ...Array.from({ length: 11 }, () => CLEAR)] })
-  const portrait = drawPortrait(25, sparse, 0x202020)!
-  expect(portrait.rows).toBe(2)
-  const cells = Array.from(portrait.cells)
-  // 셀마다 [글자, 앞색, 뒷색]. 투명한 칸이 하나도 없다
-  for (let i = 0; i < cells.length; i += 3) {
-    expect(cells[i + 1]).not.toBe(CLEAR)
-    expect(cells[i + 2]).not.toBe(CLEAR)
-  }
-  expect(cells.includes(0x202020)).toBe(true)
 })
 
 test('앞장선 포켓몬은 키우미집 풀밭을 통통 튀며 좌우로 걷고 가는 쪽을 본다', () => {

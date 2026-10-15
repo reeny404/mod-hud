@@ -16,7 +16,7 @@ export type Egg = NestEgg
 export type Stage = NestEgg['stage']
 
 // boxPage 는 0부터 센 박스 페이지. 넘치면 마지막 페이지로 당긴다
-// lead 는 앞장선 박스 칸의 key, evolving 은 가장 최근 진화. 둘 다 없으면 박스 칸에 표시를 하지 않는다
+// lead 는 키우미집에 맡긴 박스 포켓몬의 key, evolving 은 가장 최근 진화. 키우미집 풀밭이 걷는 포켓몬과 진화 장면을 고를 때 쓴다
 export type NestInput = {
   eggs: Egg[]
   daycare: HeldEgg[]
@@ -31,9 +31,9 @@ export type SpriteLookup = (species: number, size: number) => Pixels | undefined
 
 // 박스 아이콘 도트는 대부분 이보다 작아 줄이지 않고 그대로 그린다. 정수 배가 아니게 줄이면 도트가 뭉개져 더 줄이지 않는다
 export const HATCHED_SIZE = 24
-// 박스 아이콘은 이 안에 들어가게 줄인다. 큰 포켓몬(원본 32점 남짓)을 이보다 작게 줄이면 눈과 팔다리가 사라진다
+// 키우미집을 걷는 포켓몬은 이 안에 들어가게 줄인다. 큰 포켓몬(원본 32점 남짓)을 이보다 작게 줄이면 눈과 팔다리가 사라진다
 export const ICON_SIZE = 20
-// 막 진화한 박스 칸이 진화 전과 뒤 그림을 번갈아 그리는 시간
+// 막 진화한 포켓몬이 진화 전과 뒤 그림을 번갈아 그리는 시간
 export const EVOLVE_MS = 4000
 // 부화한 뒤 높이 뛰며 반짝이는 시간
 export const CELEBRATE_MS = 90 * 1000
@@ -51,9 +51,8 @@ const EGG_SLOT = 20
 const EGG_ROWS = 8
 const HATCHED_SLOT = 24
 const HATCHED_ROWS = 14
-// 박스 한 칸. 한 페이지는 한 줄이고 넘치면 페이지를 넘겨 본다
-export const TILE = 22
-export const TILE_ROWS = TILE / 2
+// 박스 한 페이지의 줄 수. 원작 골드 버전의 PC BOX 처럼 한 줄에 한 마리씩 글자로 보이고 넘치면 페이지를 넘겨 본다
+export const BOX_PER_PAGE = 6
 
 const UPPER_HALF = 0x2580
 const LOWER_HALF = 0x2584
@@ -87,11 +86,8 @@ const C = {
   daycareGround: 0x8cc860,
   daycareGroundAlt: 0x7cb850,
   boxBar: 0x3a6ea5,
-  leadStar: 0xffd23c,
   boxBarText: 0xffffff,
   boxCount: 0xffe080,
-  wall: 0xd4f0dc,
-  wallAlt: 0xbfe6cc,
 } as const
 
 // 알 몸통 14x13. 4세대 알 스프라이트를 둥글게 줄여 다시 찍은 것. 외곽선, 위쪽 하이라이트, 오른쪽 아래 그림자
@@ -556,10 +552,7 @@ export function eggsOf(sessions: readonly SessionStatus[], dex: Pokedex, now: nu
 // 그림에 쓸 스프라이트 번호. 금 간 알은 곧 나올 것이라 미리 불러 둔다
 export function speciesToLoad(input: NestInput, width: number): number[] {
   const eggs = eggsOnScreen(input, width).filter(egg => egg.stage !== 'egg' && egg.stage !== 'empty')
-  const box = boxOnPage(input, width)
-  // 막 진화한 칸이 이 페이지에 있으면 깜빡임에 쓸 진화 전 그림도 부른다
-  const before = input.evolving && box.some(entry => entry.key === input.evolving?.key) ? [input.evolving.from] : []
-  return [...new Set([...eggs.map(egg => egg.species), ...box.map(entry => entry.species), ...before])]
+  return [...new Set(eggs.map(egg => egg.species))]
 }
 
 // 픽셀 그림판. 비운 픽셀은 터미널 배경이 비친다
@@ -753,48 +746,6 @@ function drawSlot(canvas: Canvas, slotX: number, slot: number, egg: Egg, frame: 
   sprite(canvas, eggX, eggTop, eggSprite(egg.key, egg.stage, angle), EGG_PALETTE)
 }
 
-// 앞장선 박스 칸 왼쪽 위에 다는 별
-export const LEAD_STAR = C.leadStar
-const STAR = ['.s.', 'sss', '.s.']
-
-// 박스 한 칸의 셀. 박스는 많이 훑어보는 곳이라 아이콘을 움직이지 않고, 막 진화한 칸만 잠깐 깜빡이며 반짝인다
-export function drawBoxTile(
-  entry: BoxEntry | null,
-  isLead: boolean,
-  evolving: Pokedex['evolving'],
-  frame: number,
-  now: number,
-  lookup: SpriteLookup,
-): Uint32Array {
-  const canvas = canvasOf(TILE, TILE)
-  for (let y = 0; y < TILE; y++) {
-    for (let x = 0; x < TILE; x++) {
-      put(canvas, x, y, ((x >> 2) + (y >> 2)) % 2 === 0 ? C.wall : C.wallAlt)
-    }
-  }
-  if (entry) {
-    const isEvolving = evolving !== null && evolving.key === entry.key && now - evolving.at < EVOLVE_MS
-    // 원작처럼 진화 전과 뒤 그림을 두 프레임씩 번갈아 그린다
-    const species = isEvolving && Math.floor(frame / 2) % 2 === 0 ? evolving.from : entry.species
-    const image = lookup(species, ICON_SIZE)
-    const bottom = TILE - 2
-    if (image) {
-      blit(canvas, Math.floor((TILE - image.width) / 2), bottom - image.height + 1, image)
-    } else {
-      sprite(canvas, Math.floor((TILE - 8) / 2), bottom - 7, BALL, BALL_PALETTE)
-    }
-    if (isEvolving) {
-      drawSparkles(canvas, 0, 0, TILE, TILE, frame)
-    }
-    if (isLead) {
-      sprite(canvas, 0, 0, STAR, { s: C.leadStar })
-    }
-  }
-  const out: number[] = []
-  pixelCells(canvas, out)
-  return Uint32Array.from(out)
-}
-
 // 위아래 두 픽셀을 반 블록 한 칸에 담는다. 둘 다 비면 빈칸으로 둔다
 function pixelCells(canvas: Canvas, out: number[]) {
   for (let row = 0; row < canvas.height / 2; row++) {
@@ -864,22 +815,17 @@ export function eggsOnScreen(input: NestInput, width: number): Egg[] {
   return eggLayout(input.eggs, width).flatMap(row => row.eggs)
 }
 
-export function boxPerRow(width: number): number {
-  return Math.max(1, Math.floor(width / TILE))
+export function boxPages(input: NestInput): number {
+  return Math.max(1, Math.ceil(input.box.length / BOX_PER_PAGE))
 }
 
-export function boxPages(input: NestInput, width: number): number {
-  return Math.max(1, Math.ceil(input.box.length / boxPerRow(width)))
+export function boxPageOf(input: NestInput): number {
+  return Math.min(Math.max(0, input.boxPage), boxPages(input) - 1)
 }
 
-export function boxPageOf(input: NestInput, width: number): number {
-  return Math.min(Math.max(0, input.boxPage), boxPages(input, width) - 1)
-}
-
-export function boxOnPage(input: NestInput, width: number): BoxEntry[] {
-  const size = boxPerRow(width)
-  const page = boxPageOf(input, width)
-  return input.box.slice(page * size, (page + 1) * size)
+export function boxOnPage(input: NestInput): BoxEntry[] {
+  const page = boxPageOf(input)
+  return input.box.slice(page * BOX_PER_PAGE, (page + 1) * BOX_PER_PAGE)
 }
 
 // 전설 등장 장면. 원작의 야생 포켓몬 배틀처럼 줄무늬로 화면이 덮이고, 전설이 나타나고, 몬스터볼에 잡힌다
@@ -947,31 +893,25 @@ export function drawArrival(species: number, name: string, width: number, step: 
   return Uint32Array.from(out)
 }
 
-// 박스 아이콘의 원본 크기(7세대 아이콘은 40x30). 마우스를 올리면 뜨는 카드에 줄이지 않고 그린다
+// 아이콘의 원본 크기(7세대 아이콘은 40x30). 야생 전설을 줄이지 않고 그린다
 const PORTRAIT_SIZE = 40
 
-// background 를 주면 빈 칸을 그 색으로 칠한다. 겹쳐 뜨는 카드에 그려도 아래 화면이 비치지 않게 한다
-export function drawPortrait(
-  species: number,
-  lookup: SpriteLookup,
-  background: number = CLEAR,
-): { columns: number; rows: number; cells: Uint32Array } | null {
+export function drawPortrait(species: number, lookup: SpriteLookup): { columns: number; rows: number; cells: Uint32Array } | null {
   const image = lookup(species, PORTRAIT_SIZE)
   if (!image) {
     return null
   }
   const canvas = canvasOf(image.width, image.height + (image.height % 2))
-  canvas.px.fill(background)
   blit(canvas, 0, 0, image)
   const out: number[] = []
   pixelCells(canvas, out)
   return { columns: canvas.width, rows: canvas.height / 2, cells: Uint32Array.from(out) }
 }
 
-// 박스 칸 key 가 있는 페이지. 막 진화한 칸으로 페이지를 넘길 때 쓴다
-export function boxPageOfKey(input: NestInput, width: number, key: string): number {
+// 박스 key 가 있는 페이지. 막 진화한 포켓몬의 줄로 페이지를 넘길 때 쓴다
+export function boxPageOfKey(input: NestInput, key: string): number {
   const index = input.box.findIndex(entry => entry.key === key)
-  return index < 0 ? boxPageOf(input, width) : Math.floor(index / boxPerRow(width))
+  return index < 0 ? boxPageOf(input) : Math.floor(index / BOX_PER_PAGE)
 }
 
 // 키우미집 풀밭 줄 수. 머리줄은 누르면 접히게 패널이 따로 그린다
@@ -1001,7 +941,7 @@ export function nestRows(input: NestInput, width: number): number {
 
 // 앞장선 포켓몬이 풀밭을 걸으면 풀밭이 이만큼 높아진다. 걷는 포켓몬과 통통 튀는 한 칸이 들어간다
 const WALK_GROUND_ROWS = 11
-// 풀밭을 걷는 포켓몬의 크기. 더 작으면 큰 포켓몬이 뭉개져 박스 아이콘과 같게 둔다
+// 풀밭을 걷는 포켓몬의 크기. 더 작으면 큰 포켓몬이 뭉개진다
 export const WALKER_SIZE = ICON_SIZE
 // 걷는 포켓몬이 통통 튀는 높이. 두 프레임마다 한 칸 뛴다
 const STEP_HOP = [0, 1, 1, 0]
