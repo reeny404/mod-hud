@@ -622,6 +622,8 @@ const pokedex = atom({ plugin: 'mod-hud', key: 'pokedex' } as const, emptyPokede
 const eggs = atom({ plugin: 'mod-hud', key: 'eggs' } as const, [])
 
 let pendingCheckedAt = 0
+// 이 패널에서 박스로 보낸 알. 기록을 쓰는 세션이 반영할 때까지 기록을 다시 읽어도 패널에 되살리지 않는다
+const sending = new Set<string>()
 
 async function readPokedex($: EngineInterface, home: string): Promise<Pokedex> {
   try {
@@ -662,6 +664,7 @@ async function sendToBox($: EngineInterface, key: string) {
   await $.process.run(['mkdir', '-p', dir])
   await $.fs.write(`${dir}/${key}`, '')
   // 기록을 쓰는 세션이 다음 조회 때 넣으므로, 그동안 이 패널에서는 바로 빼 둔다
+  sending.add(key)
   await update($, eggs, prev => prev.filter(egg => egg.key !== key))
   void refreshSessions($)
 }
@@ -776,7 +779,14 @@ async function keepPokedex($: EngineInterface, sessions: SessionStatus[], now: n
     }
   }
   await update($, pokedex, () => dex)
-  const next = eggsOf(sessions, dex, now)
+  const all = eggsOf(sessions, dex, now)
+  // 기록에서 더 이상 부화한 알이 아니면 박스에 들어간 것이라 잊는다
+  for (const key of sending) {
+    if (!all.some(egg => egg.key === key && egg.stage === 'hatched')) {
+      sending.delete(key)
+    }
+  }
+  const next = all.filter(egg => !sending.has(egg.key))
   // 30초마다 부르므로 그대로면 쓰지 않아 패널을 괜히 다시 그리지 않는다
   await update($, eggs, prev => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
 }

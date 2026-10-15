@@ -253,3 +253,57 @@ test('몬스터볼을 누르면 기록을 쓰는 세션을 기다리지 않고 �
   expect(await pane.find({ type: 'Text', text: /^2$/ })).toBeDefined()
   await pane.unmount()
 })
+
+test('박스로 보내기를 누르면 기록을 쓰는 세션을 기다리지 않고 버튼을 걷고, 기록에 반영될 때까지 다시 보이지 않는다', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const hatchedEgg = { key: 'egg1', species: 13, root: '/p/a', branch: 'feat/x', label: 'feat/x', at: NOW - 1000 }
+  let dex: Pokedex = { ...emptyPokedex(), pending: [{ ...hatchedEgg, mrState: 'merged' }], hatched: { egg1: NOW - 1000 } }
+  const written: string[] = []
+  on('env.get', () => ({ value: '/home/test' }))
+  on('fs.exists', ($, e) => ({ value: (e as unknown as { path: string }).path.endsWith('mod-hud-pokedex.json') }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.read', ($, e) => {
+    const path = (e as unknown as { path: string }).path
+    if (path.endsWith('mod-hud-pokedex.json')) {
+      return { value: JSON.stringify(dex) }
+    }
+    if (path.endsWith('names-en.json')) {
+      return { value: JSON.stringify({ 13: 'Weedle' }) }
+    }
+    throw new Error('ENOENT')
+  })
+  on('fs.write', ($, e) => {
+    const { path } = e as unknown as { path: string }
+    if (path.includes('mod-hud-sendbox')) {
+      written.push(path)
+    }
+    return { value: undefined }
+  })
+  on('http.fetch', () => ({ value: { ok: false, status: 404, text: '' } }) as never)
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('command.register', () => ({ value: { name: 'x' } }) as never)
+  on('session.id', () => ({ value: 'self' }))
+  on('session.cwd', () => ({ value: '/p/a' }))
+  on('session.repo', () => ({ value: null }))
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.blit', () => ({ value: { deny: false } }) as never)
+  on('session.start', ($, e) => e as never)
+  await $.session.start({ source: 'startup', cwd: '/p/a' } as never)
+
+  const props = { placement: 'dock', bodyColumns: 60, scroll: { bodyRows: 60 } }
+  const pane = await $.ui.mount({ plugin: 'mod-hud', surface: 'terminal', component: 'Pane', requestId: 'mod-hud', props } as never)
+  expect(nodes(await pane.drawn(), 'Button', { key: 'send-egg1' }).length).toBe(1)
+  await pane.press({ key: 'send-egg1' })
+  // 이 세션은 기록을 쓰지 않지만 요청을 남기고 버튼은 바로 걷힌다
+  expect(written).toEqual(['/home/test/.claude/mod-hud-sendbox/egg1'])
+  expect(nodes(await pane.drawn(), 'Button', { key: 'send-egg1' }).length).toBe(0)
+  // 기록을 쓰는 세션이 아직 반영하지 않아도 다음 조회에서 버튼이 되살아나지 않는다
+  await clock.advance(30_000)
+  expect(nodes(await pane.drawn(), 'Button', { key: 'send-egg1' }).length).toBe(0)
+  // 기록을 쓰는 세션이 박스에 넣으면 박스에 보인다
+  dex = { ...dex, pending: [], hatched: {}, box: [entry('egg1', 13, NOW + 31_000)] }
+  await clock.advance(30_000)
+  expect(nodes(await pane.drawn(), 'Button', { key: 'send-egg1' }).length).toBe(0)
+  expect(await pane.find({ type: 'Text', text: /^1$/ })).toBeDefined()
+  await pane.unmount()
+})
