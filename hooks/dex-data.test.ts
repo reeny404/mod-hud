@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { canEvolve, EGG_SPECIES, EVOLUTIONS, typesOf } from './dex-data'
+import { canEvolve, EGG_SPECIES, EVOLUTIONS, rarityOf, typesOf } from './dex-data'
 
 test('알에서 나오는 종은 74종이고 전설과 진화형은 없다', () => {
   expect(EGG_SPECIES.length).toBe(74)
@@ -38,4 +38,18 @@ test('속성은 골드 버전 기준이라 코일은 강철이 붙고 삐삐는 
   expect(typesOf(149)).toBe('DRAGON/FLYING')
   expect(typesOf(151)).toBe('PSYCHIC')
   expect(typesOf(152)).toBe('')
+})
+
+test('전설은 legend, 귀한 포켓몬은 rare, 흔한 포켓몬은 표시가 없다', () => {
+  for (const legend of [144, 145, 146, 150, 151]) {
+    expect(rarityOf(legend)).toBe('legend')
+  }
+  // 망나뇽, 잠만보, 라프라스, 이브이
+  for (const rare of [149, 143, 131, 133]) {
+    expect(rarityOf(rare)).toBe('rare')
+  }
+  // 뿔충이, 꼬렛, 리자몽
+  for (const common of [13, 19, 6]) {
+    expect(rarityOf(common)).toBe(null)
+  }
 })

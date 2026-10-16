@@ -44,7 +44,7 @@ import {
   parseWorktrees,
   readEnvValue,
 } from './issues-lib'
-import { canEvolve, typesOf } from './dex-data'
+import { canEvolve, rarityOf, typesOf } from './dex-data'
 import { advanceEvolution, TAKE_BACK, xpBar, xpLeft } from './evolve-lib'
 import { helpText, isHelp } from './help-lib'
 import type { EncounterAction } from './evolve-lib'
@@ -65,9 +65,11 @@ import {
   EVOLVE_MS,
   eggsOnScreen,
   emptyPokedex,
+  favoritesFirst,
   keeperOf,
   localDay,
   nestRows,
+  parseFavorites,
   parsePokedex,
   speciesToLoad,
   updatePending,
@@ -371,8 +373,11 @@ async function refreshSessions($: EngineInterface) {
 
 // 저장소의 worktree 와 MR
 
+// 포켓몬 이름을 쓸 언어. PokeAPI 의 언어 이름이다
+type PokemonLanguage = 'en' | 'ko'
+
 // plugin.json 의 userConfig. register 가 받은 값으로 채운다
-const config = { gitlabUrl: '', baseBranch: '', autoCleanup: false }
+const config = { gitlabUrl: '', baseBranch: '', autoCleanup: false, pokemonLanguage: 'en' as PokemonLanguage }
 
 const LINEAR_TTL_MS = 5 * 60 * 1000
 // 파일을 읽어 조회 주기가 됐는지 보는 간격. 파일만 읽으므로 짧아도 된다
@@ -611,6 +616,8 @@ const SENDBOX_DIR = '.claude/mod-hud-sendbox'
 const LEAD_FILE = '.claude/mod-hud-lead'
 // 야생 전설에게 누른 버튼(throw, run, dismiss). 어느 세션에서 눌러도 이 파일에 쓰고, 기록을 쓰는 세션이 읽어 반영한 뒤 지운다
 const ENCOUNTER_FILE = '.claude/mod-hud-encounter'
+// 즐겨찾는 박스 key. 기록과 따로 두어 어느 세션에서 눌러도 바로 쓰고, 다른 세션은 다음 조회 때 읽는다
+const FAVORITES_FILE = '.claude/mod-hud-favorites.json'
 // 세션이 닫힌 뒤 머지를 기다리는 알의 MR 을 다시 조회하는 간격
 const PENDING_CHECK_MS = 2 * 60 * 1000
 
@@ -618,6 +625,8 @@ const pokedex = atom({ plugin: 'mod-hud', key: 'pokedex' } as const, emptyPokede
 const eggs = atom({ plugin: 'mod-hud', key: 'eggs' } as const, [])
 
 let pendingCheckedAt = 0
+// 즐겨찾는 포켓몬은 PC BOX 맨 앞에 모이고 이름 앞에 ♥ 가 붙는다
+let favorites = new Set<string>()
 // 이 패널에서 박스로 보낸 알. 기록을 쓰는 세션이 반영할 때까지 기록을 다시 읽어도 패널에 되살리지 않는다
 const sending = new Set<string>()
 
@@ -667,6 +676,32 @@ async function sendToBox($: EngineInterface, key: string) {
     $.ui.toast(`${await pokemonName($, home, egg.species)} was sent to the PC BOX (${egg.label})`)
   }
   void refreshSessions($)
+}
+
+async function readFavorites($: EngineInterface, home: string): Promise<Set<string>> {
+  try {
+    const path = `${home}/${FAVORITES_FILE}`
+    return new Set((await $.fs.exists(path)) ? parseFavorites(await $.fs.read(path)) : [])
+  } catch {
+    return new Set()
+  }
+}
+
+async function toggleFavorite($: EngineInterface, key: string) {
+  const home = await $.env.get('HOME')
+  if (!home) {
+    return
+  }
+  // 다른 세션에서 바꾼 것을 덮지 않게 파일을 다시 읽고 고친다
+  const next = await readFavorites($, home)
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+  }
+  await $.fs.write(`${home}/${FAVORITES_FILE}`, JSON.stringify([...next]))
+  favorites = next
+  $.ui.invalidate('ui.render')
 }
 
 async function pickLead($: EngineInterface, key: string) {
@@ -779,6 +814,7 @@ async function keepPokedex($: EngineInterface, sessions: SessionStatus[], now: n
       $.ui.toast(`Oh no! ${(await pokemonName($, home, species)).toUpperCase()} fled...`)
     }
   }
+  favorites = await readFavorites($, home)
   await update($, pokedex, () => dex)
   const all = eggsOf(sessions, dex, now)
   // 기록에서 더 이상 부화한 알이 아니면 박스에 들어간 것이라 잊는다
@@ -854,7 +890,20 @@ async function loadSprite($: EngineInterface, species: number) {
   }
 }
 
-// 영어 이름. 파일에서 한 번 읽어 메모리에 두고, 모르는 이름은 PokeAPI 에서 받아 파일에 더한다
+// 펼친 박스 줄에 그릴 도트. 아직 없으면 받아 온 뒤 다시 그린다
+function loadOpened($: EngineInterface, species: number) {
+  if (sprites.has(species)) {
+    return
+  }
+  void loadSprite($, species).then(() => {
+    if (sprites.get(species)) {
+      $.ui.invalidate('ui.render')
+    }
+  })
+}
+
+// 설정한 언어의 이름. 파일에서 한 번 읽어 메모리에 두고, 모르는 이름은 PokeAPI 에서 받아 파일에 더한다. 언어마다 파일을 따로 둔다
+const namesPath = (home: string) => `${home}/${SPRITE_DIR}/names-${config.pokemonLanguage}.json`
 const names = new Map<number, string>()
 // 이 세션에서 받으려다 실패한 종. 패널을 그릴 때마다 네트워크를 다시 부르지 않는다
 const namesFailed = new Set<number>()
@@ -864,7 +913,7 @@ let namesRead: Promise<void> | null = null
 function readNames($: EngineInterface, home: string): Promise<void> {
   namesRead ??= (async () => {
     try {
-      const saved = JSON.parse(await $.fs.read(`${home}/${SPRITE_DIR}/names-en.json`)) as Record<string, string>
+      const saved = JSON.parse(await $.fs.read(namesPath(home))) as Record<string, string>
       for (const [species, name] of Object.entries(saved)) {
         names.set(Number(species), name)
       }
@@ -884,13 +933,13 @@ function fetchName($: EngineInterface, home: string, species: number): Promise<s
     try {
       const res = await $.http.fetch(speciesUrl(species))
       const parsed = res.ok ? (JSON.parse(res.text) as { names?: { name: string; language: { name: string } }[] }) : null
-      const name = parsed?.names?.find(one => one.language.name === 'en')?.name
+      const name = parsed?.names?.find(one => one.language.name === config.pokemonLanguage)?.name
       if (!name) {
         namesFailed.add(species)
         return null
       }
       names.set(species, name)
-      await $.fs.write(`${home}/${SPRITE_DIR}/names-en.json`, JSON.stringify(Object.fromEntries(names)))
+      await $.fs.write(namesPath(home), JSON.stringify(Object.fromEntries(names)))
       return name
     } catch {
       namesFailed.add(species)
@@ -976,7 +1025,10 @@ let daycareRowsDrawn = 0
 // 키우미집을 접었는지. 접으면 머리줄의 맡긴 포켓몬 경험치와 남은 알 수만 보인다
 let daycareCollapsed = false
 // 이번 박스 페이지의 줄마다 보일 이름과 속성. 박스 key 로 찾는다
-let boxRows = new Map<string, { name: string; types: string; caught: string; canLead: boolean }>()
+let boxRows = new Map<
+  string,
+  { name: string; types: string; caught: string; canLead: boolean; rarity: ReturnType<typeof rarityOf>; isFavorite: boolean }
+>()
 // 눌러 펼친 박스 줄의 key. 펼친 줄 아래에 잡은 날짜와 어디서 왔는지, 키우미집 버튼이 보인다
 let boxOpen: string | null = null
 let nestFrame = 0
@@ -1158,14 +1210,41 @@ async function isPaneUp($: EngineInterface): Promise<boolean> {
   return (await $.ui.panes()).some(pane => pane.id === PANE)
 }
 
+// Refresh now 를 누른 뒤 다시 누를 수 없는 시간. 그동안 버튼 자리에 조회 중인지, 끝났는지를 보인다
+const MANUAL_REFRESH_LOCK_MS = 60 * 1000
+// Refresh now 를 누른 시각과 그 조회가 끝났는지. 누른 적 없으면 null 이다
+let manualRefresh: { at: number; isDone: boolean } | null = null
+
 async function refreshAll($: EngineInterface) {
   await Promise.all([refreshSessions($), refreshIssues($, true), refreshInbox($, true)])
+}
+
+async function refreshByHand($: EngineInterface) {
+  const at = await $.clock.now()
+  manualRefresh = { at, isDone: false }
+  $.ui.invalidate('ui.render')
+  $.clock.after(MANUAL_REFRESH_LOCK_MS, () => {
+    if (manualRefresh?.at === at) {
+      manualRefresh = null
+      $.ui.invalidate('ui.render')
+    }
+  })
+  try {
+    await refreshAll($)
+  } finally {
+    if (manualRefresh?.at === at) {
+      manualRefresh = { at, isDone: true }
+      $.ui.invalidate('ui.render')
+    }
+  }
 }
 
 export const register: Register = (on, options) => {
   config.gitlabUrl = typeof options.gitlabUrl === 'string' ? options.gitlabUrl : ''
   config.baseBranch = typeof options.baseBranch === 'string' ? options.baseBranch : ''
   config.autoCleanup = options.autoCleanup === true
+  // 모르는 값이면 영어로 둔다
+  config.pokemonLanguage = options.pokemonLanguage === 'ko' ? 'ko' : 'en'
 
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -1475,13 +1554,15 @@ export const register: Register = (on, options) => {
     const hasNest = Raster !== null && e.props.placement === 'dock' && e.props.bodyColumns >= 20
     if (hasNest) {
       const dex = await read($, pokedex)
+      // 즐겨찾는 포켓몬이 맨 앞에 오게 줄을 세운 뒤 페이지를 나눈다
+      const box = favoritesFirst(dex.box, favorites)
       // 새 진화를 처음 보면 그 칸이 있는 페이지로 넘긴다
       const columns = e.props.bodyColumns
       const home = (await $.env.get('HOME')) ?? ''
       if (dex.evolving && dex.evolving.at !== evolvingSeen && now - dex.evolving.at < EVOLVING_FRESH_MS) {
         evolvingSeen = dex.evolving.at
         evolvingSeenAt = now
-        boxPage = boxPageOfKey({ eggs: [], daycare: [], box: dex.box, boxPage }, dex.evolving.key)
+        boxPage = boxPageOfKey({ eggs: [], daycare: [], box, boxPage }, dex.evolving.key)
       }
       const evolving = dex.evolving && dex.evolving.at === evolvingSeen ? { ...dex.evolving, at: evolvingSeenAt } : null
       // 막 온 전설을 처음 보면 이 세션의 시각부터 등장 장면을 센다
@@ -1508,7 +1589,7 @@ export const register: Register = (on, options) => {
       if (dex.encounter) {
         void loadSprite($, dex.encounter.species)
       }
-      const input = { eggs: await read($, eggs), daycare: dex.daycare, box: dex.box, boxPage, lead: dex.lead, evolving }
+      const input = { eggs: await read($, eggs), daycare: dex.daycare, box, boxPage, lead: dex.lead, evolving }
       nestScene = { columns, rows: nestRows(input, columns), input }
       const lead = dex.box.find(entry => entry.key === dex.lead)
       boxHeader = {
@@ -1520,12 +1601,18 @@ export const register: Register = (on, options) => {
       }
       boxRows = new Map()
       for (const entry of boxOnPage(input)) {
+        if (entry.key === boxOpen) {
+          loadOpened($, entry.species)
+        }
         // 다음 진화는 진화할 때까지 보이지 않는다
         boxRows.set(entry.key, {
           name: await shownName($, home, entry.species),
           types: typesOf(entry.species),
           caught: localDay(entry.at),
-          canLead: canEvolve(entry.species) && entry.key !== dex.lead,
+          // 진화하지 않는 포켓몬도 맡길 수 있다. 맡긴 동안은 머리줄에 MAX 로 보인다
+          canLead: entry.key !== dex.lead,
+          rarity: rarityOf(entry.species),
+          isFavorite: favorites.has(entry.key),
         })
       }
       const walking = dex.box.find(entry => entry.key === dex.lead)
@@ -1554,7 +1641,11 @@ export const register: Register = (on, options) => {
                 {ICON.inbox} Linear {freshness(notes.fetchedAt, INBOX_TTL_MS, now)}
               </Text>
             )}
-            <Button key="refresh" label="Refresh now" onPress={() => refreshAll($)} />
+            {manualRefresh && now - manualRefresh.at < MANUAL_REFRESH_LOCK_MS ? (
+              <Text dimColor>{manualRefresh.isDone ? '✓ Refreshed · again in 1m' : 'Refreshing…'}</Text>
+            ) : (
+              <Button key="refresh" label="Refresh now" onPress={() => refreshByHand($)} />
+            )}
           </Box>
 
           {notes.isOk && (
@@ -1854,7 +1945,12 @@ export const register: Register = (on, options) => {
                           >
                             <Text wrap="truncate-end" color={isLead ? '#ffe080' : undefined}>
                               {isLead ? '★ ' : '  '}
+                              {/* 즐겨찾는 포켓몬은 이름 앞에 분홍 ♥. 아닌 줄은 같은 폭을 비워 이름이 같은 자리에서 시작한다 */}
+                              {row.isFavorite ? <Text color="#ff7aa8">♥ </Text> : '  '}
                               {row.name.toUpperCase()}
+                              {/* 전설은 금빛 ✦, 귀한 포켓몬은 하늘빛 ✧ */}
+                              {row.rarity === 'legend' && <Text color="#ffc840"> ✦</Text>}
+                              {row.rarity === 'rare' && <Text color="#80c8ff"> ✧</Text>}
                               {row.types && <Text dimColor>  {row.types}</Text>}
                             </Text>
                           </Button>
@@ -1864,9 +1960,26 @@ export const register: Register = (on, options) => {
                       </Box>
                       {boxOpen === entry.key && (
                         <Box flexDirection="column" paddingX={4}>
+                          {(() => {
+                            // 펼친 포켓몬은 원본 크기 도트로 보인다. 받기 전에는 글자만 보인다
+                            const image = drawPortrait(entry.species, lookupSprite)
+                            return (
+                              image && (
+                                <Raster key={`box-portrait-${entry.key}`} columns={image.columns} rows={image.rows} cells={base64Of(image.cells)} />
+                              )
+                            )
+                          })()}
                           <Text dimColor wrap="truncate-end">
                             caught {row.caught} · {entry.label}
+                            {row.rarity === 'legend' ? ' · LEGENDARY' : row.rarity === 'rare' ? ' · RARE' : ''}
                           </Text>
+                          <Box>
+                            <Button
+                              key={`favorite-${entry.key}`}
+                              label={row.isFavorite ? '♡ Unfavorite' : '♥ Favorite'}
+                              onPress={() => void toggleFavorite($, entry.key)}
+                            />
+                          </Box>
                           {row.canLead && (
                             <Box>
                               <Button key={`lead-${entry.key}`} label="Leave at DAY CARE" onPress={() => pickLead($, entry.key)} />

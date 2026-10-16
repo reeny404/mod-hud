@@ -17,7 +17,7 @@ And who knows, keep at it long enough and you might just run into a legendary Po
 ## What you get
 
 - **An egg per session.** Each working session takes one of the 7 eggs the DAY CARE gets every day. Only unevolved Gen 1 Pokémon come out of eggs.
-- **PC BOX.** Hatched Pokémon go here when the session closes. Like the PC BOX in Pokémon Gold, it lists one Pokémon per line with its name and type; press a line to see when and where it was caught.
+- **PC BOX.** Hatched Pokémon go here when the session closes. Like the PC BOX in Pokémon Gold, it lists one Pokémon per line with its name and type; press a line to see its sprite and when and where it was caught. Any Pokémon can be left at the DAY CARE; ones that no longer evolve show MAX.
 - **DAY CARE.** The Pokémon you leave here hops around the grass and gains experience only while your sessions are actually working. Every 3 hours of work it evolves one stage.
 - **A session HUD, too.** A line above the prompt and the `/mod-hud` panel show which sessions are waiting on you, which are working, your worktrees, MRs that need you, and Linear mentions. Sections you have no setup for simply stay hidden.
 

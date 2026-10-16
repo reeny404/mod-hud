@@ -35,18 +35,29 @@ function textOf(node: unknown): string {
   return (one?.children ?? []).map(textOf).join('')
 }
 
+// PokeAPI 의 40x30 피카츄 아이콘. 투명한 테두리를 잘라 내면 폭이 PIKACHU_COLUMNS 다
+const ICON = 'iVBORw0KGgoAAAANSUhEUgAAACgAAAAeBAMAAACs80HuAAAAIVBMVEUxMTExMTFSUlKchEKlazG1cym9lCHFpSn3Y1L31jH///98M3JMAAAAAXRSTlMAQObYZgAAAJVJREFUKJHVjzEKw0AQA7U/uEuR5UqbgLnSpUt/IT9xmiVPcHmGYKvMT1PvxpA6KocRQsCfJZ8w6QBA0gksi4O6ADnv5lQdkftqDoomYW/m6spWOASR5LQFUcgnR/UzhfubTbxZJl7IpLF+rGy+fh14rLzP/mQ2VvLmr0MfrK8OAVpPBhFi5BYhcmGLDJDyJQKQE/YrHwXQKRtr0GeSAAAAAElFTkSuQmCC'
+const PIKACHU_COLUMNS = 21
+
 const entry = (key: string, species: number, at: number): BoxEntry => ({ key, species, root: '/p/a', branch: null, label: key, at })
 
 test('옆에 붙은 패널은 DAY CARE 머리줄에 맡긴 포켓몬과 경험치를 보이고 PC BOX 를 한 줄에 한 마리씩 글자로 보인다', async ($, on) => {
   mock.clock(on, { now: NOW })
   const dex: Pokedex = { ...emptyPokedex(), box: [entry('a', 19, 1), entry('b', 6, 2), entry('c', 16, 3)], lead: 'a', xp: 0 }
   on('env.get', () => ({ value: '/home/test' }))
-  on('fs.exists', ($, e) => ({ value: (e as unknown as { path: string }).path.endsWith('mod-hud-pokedex.json') }))
+  on('fs.exists', ($, e) => {
+    const path = (e as unknown as { path: string }).path
+    return { value: path.endsWith('mod-hud-pokedex.json') || path.endsWith('icons/16.png') }
+  })
   on('fs.list', () => ({ value: [] }))
   on('fs.read', ($, e) => {
     const path = (e as unknown as { path: string }).path
     if (path.endsWith('mod-hud-pokedex.json')) {
       return { value: JSON.stringify(dex) }
+    }
+    // 구구 자리에 피카츄 아이콘을 둔다
+    if (path.endsWith('icons/16.png')) {
+      return { value: { base64: ICON } } as never
     }
     if (path.endsWith('names-en.json')) {
       return { value: JSON.stringify({ 19: 'Rattata', 20: 'Raticate', 6: 'Charizard', 16: 'Pidgey', 17: 'Pidgeotto' }) }
@@ -78,22 +89,27 @@ test('옆에 붙은 패널은 DAY CARE 머리줄에 맡긴 포켓몬과 경험�
   let tree = await pane.drawn()
   expect(nodes(tree, 'Raster').some(raster => String(raster.props?.key).startsWith('tile-'))).toBe(false)
   const row = (key: string) => nodes(tree, 'Button', { key: `box-row-${key}` }).map(textOf).join('')
-  expect(row('a')).toBe('★ RATTATA  NORMAL')
-  expect(row('b')).toBe('  CHARIZARD  FIRE/FLYING')
-  expect(row('c')).toBe('  PIDGEY  NORMAL/FLYING')
+  expect(row('a')).toBe('★   RATTATA  NORMAL')
+  expect(row('b')).toBe('    CHARIZARD  FIRE/FLYING')
+  expect(row('c')).toBe('    PIDGEY  NORMAL/FLYING')
   // 다음 진화는 미리 보이지 않고, 키우미집 버튼은 줄을 펼치기 전에는 없다
   expect(await pane.find({ type: 'Text', text: /Raticate|Pidgeotto/ })).toBeUndefined()
   expect(nodes(tree, 'Button', { key: 'lead-c' }).length).toBe(0)
-  // 줄을 누르면 잡은 날짜와 어디서 왔는지, 진화할 수 있으면 Leave at DAY CARE 버튼이 펼쳐진다
+  // 펼치기 전에는 박스 포켓몬의 도트를 그리지 않는다
+  expect(nodes(tree, 'Raster').some(raster => String(raster.props?.key).startsWith('box-portrait-'))).toBe(false)
+  // 줄을 누르면 그 포켓몬의 도트와 잡은 날짜, 어디서 왔는지, 진화할 수 있으면 Leave at DAY CARE 버튼이 펼쳐진다
   await pane.press({ key: 'box-row-c' })
   tree = await pane.drawn()
+  // 도트는 받은 뒤 다시 그릴 때 나타난다
+  tree = await pane.drawn()
+  expect(nodes(tree, 'Raster', { key: 'box-portrait-c', columns: PIKACHU_COLUMNS }).length).toBe(1)
   expect(await pane.find({ type: 'Text', text: /caught 1970-01-01 · c/ })).toBeDefined()
   expect(nodes(tree, 'Button', { key: 'lead-c', label: 'Leave at DAY CARE' }).length).toBe(1)
-  // 다른 줄을 누르면 그 줄만 펼쳐진다. 최종 진화형은 맡길 수 없다
+  // 다른 줄을 누르면 그 줄만 펼쳐진다. 진화하지 않는 최종 진화형도 맡길 수 있다
   await pane.press({ key: 'box-row-b' })
   tree = await pane.drawn()
   expect(nodes(tree, 'Button', { key: 'lead-c' }).length).toBe(0)
-  expect(nodes(tree, 'Button', { key: 'lead-b' }).length).toBe(0)
+  expect(nodes(tree, 'Button', { key: 'lead-b', label: 'Leave at DAY CARE' }).length).toBe(1)
   // 같은 줄을 다시 누르면 접힌다
   await pane.press({ key: 'box-row-b' })
   expect(await pane.find({ type: 'Text', text: /caught/ })).toBeUndefined()
@@ -318,5 +334,96 @@ test('박스로 보내기를 누르면 기록을 쓰는 세션을 기다리지 �
   await clock.advance(30_000)
   expect(nodes(await pane.drawn(), 'Button', { key: 'send-egg1' }).length).toBe(0)
   expect(await pane.find({ type: 'Text', text: /^1$/ })).toBeDefined()
+  await pane.unmount()
+})
+
+test('Refresh now 를 누르면 1분 동안 버튼 대신 조회 중인지, 끝났는지를 보이고 다시 누를 수 없다', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  on('env.get', () => ({ value: '/home/test' }))
+  on('fs.exists', () => ({ value: false }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.read', () => {
+    throw new Error('ENOENT')
+  })
+  on('fs.write', () => ({ value: undefined }))
+  on('http.fetch', () => ({ value: { ok: false, status: 404, text: '' } }) as never)
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('command.register', () => ({ value: { name: 'x' } }) as never)
+  on('session.id', () => ({ value: 'self' }))
+  on('session.cwd', () => ({ value: '/p/a' }))
+  on('session.repo', () => ({ value: null }))
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.blit', () => ({ value: { deny: false } }) as never)
+  on('session.start', ($, e) => e as never)
+  await $.session.start({ source: 'startup', cwd: '/p/a' } as never)
+
+  const props = { placement: 'dock', bodyColumns: 60, scroll: { bodyRows: 60 } }
+  const pane = await $.ui.mount({ plugin: 'mod-hud', surface: 'terminal', component: 'Pane', requestId: 'mod-hud', props } as never)
+  expect(nodes(await pane.drawn(), 'Button', { key: 'refresh' }).length).toBe(1)
+  await pane.press({ key: 'refresh' })
+  expect(nodes(await pane.drawn(), 'Button', { key: 'refresh' }).length).toBe(0)
+  expect(await pane.find({ type: 'Text', text: /Refreshed · again in 1m/ })).toBeDefined()
+  // 1분이 지나기 전에는 버튼이 돌아오지 않는다
+  await clock.advance(59_000)
+  expect(nodes(await pane.drawn(), 'Button', { key: 'refresh' }).length).toBe(0)
+  await clock.advance(1_000)
+  expect(nodes(await pane.drawn(), 'Button', { key: 'refresh' }).length).toBe(1)
+  await pane.unmount()
+})
+
+test('전설은 ✦, 귀한 포켓몬은 ✧ 가 이름 뒤에, 즐겨찾는 포켓몬은 ♥ 가 이름 앞에 붙고 즐겨찾는 포켓몬이 PC BOX 맨 앞에 온다', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const dex: Pokedex = { ...emptyPokedex(), box: [entry('legend:146', 146, 0), entry('b', 143, 1), entry('a', 13, 2)], lead: null, xp: 0 }
+  const writes: Array<{ path: string; text: string }> = []
+  on('env.get', () => ({ value: '/home/test' }))
+  on('fs.exists', ($, e) => {
+    const path = (e as unknown as { path: string }).path
+    return { value: path.endsWith('mod-hud-pokedex.json') || path.endsWith('mod-hud-favorites.json') }
+  })
+  on('fs.list', () => ({ value: [] }))
+  on('fs.read', ($, e) => {
+    const path = (e as unknown as { path: string }).path
+    if (path.endsWith('mod-hud-pokedex.json')) {
+      return { value: JSON.stringify(dex) }
+    }
+    if (path.endsWith('mod-hud-favorites.json')) {
+      return { value: JSON.stringify(['a']) }
+    }
+    if (path.endsWith('names-en.json')) {
+      return { value: JSON.stringify({ 146: 'Moltres', 143: 'Snorlax', 13: 'Weedle' }) }
+    }
+    throw new Error('ENOENT')
+  })
+  on('fs.write', ($, e) => {
+    writes.push(e as unknown as { path: string; text: string })
+    return { value: undefined }
+  })
+  on('http.fetch', () => ({ value: { ok: false, status: 404, text: '' } }) as never)
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('command.register', () => ({ value: { name: 'x' } }) as never)
+  on('session.id', () => ({ value: 'self' }))
+  on('session.cwd', () => ({ value: '/p/a' }))
+  on('session.repo', () => ({ value: null }))
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.blit', () => ({ value: { deny: false } }) as never)
+  on('session.start', ($, e) => e as never)
+  await $.session.start({ source: 'startup', cwd: '/p/a' } as never)
+
+  const props = { placement: 'dock', bodyColumns: 66, scroll: { bodyRows: 60 } }
+  const pane = await $.ui.mount({ plugin: 'mod-hud', surface: 'terminal', component: 'Pane', requestId: 'mod-hud', props } as never)
+  const tree = await pane.drawn()
+  const rows = nodes(tree, 'Button').filter(node => String(node.props?.key).startsWith('box-row-'))
+  // 즐겨찾는 뿔충이가 맨 앞이다
+  expect(rows.map(node => node.props?.key)).toEqual(['box-row-a', 'box-row-legend:146', 'box-row-b'])
+  // 즐겨찾지 않는 줄도 ♥ 자리를 비워 이름이 같은 자리에서 시작한다
+  expect(textOf(rows[0])).toMatch(/^  ♥ WEEDLE/)
+  expect(textOf(rows[1])).toMatch(/^    MOLTRES ✦/)
+  expect(textOf(rows[2])).toMatch(/^    SNORLAX ✧/)
+  // 펼친 줄의 버튼으로 즐겨찾기를 끄면 파일에서 뺀다
+  await pane.press({ key: 'box-row-a' })
+  expect(nodes(await pane.drawn(), 'Button', { key: 'favorite-a', label: '♡ Unfavorite' }).length).toBe(1)
+  await pane.press({ key: 'favorite-a' })
+  const saved = writes.filter(write => write.path.endsWith('mod-hud-favorites.json'))
+  expect(saved.at(-1)?.text).toBe('[]')
   await pane.unmount()
 })

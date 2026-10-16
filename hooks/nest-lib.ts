@@ -47,7 +47,8 @@ const DONE_MAX = 500
 const EGG_ROWS_MAX = 2
 
 // 알 칸과 부화한 포켓몬 칸의 폭, 그림 줄 수. 알만 있는 줄은 낮게, 포켓몬이 있는 줄만 높게 그린다
-const EGG_SLOT = 20
+// 알 칸은 가장 크게 기운 알(16칸)이 딱 들어가는 폭이다. 좁은 패널에도 한 줄에 알이 많이 들어가게 한다
+const EGG_SLOT = 16
 const EGG_ROWS = 8
 const HATCHED_SLOT = 24
 const HATCHED_ROWS = 14
@@ -906,6 +907,21 @@ export function drawPortrait(species: number, lookup: SpriteLookup): { columns: 
   const out: number[] = []
   pixelCells(canvas, out)
   return { columns: canvas.width, rows: canvas.height / 2, cells: Uint32Array.from(out) }
+}
+
+// 즐겨찾기 파일(~/.claude/mod-hud-favorites.json)은 박스 key 의 배열이다. 읽지 못하면 아무것도 즐겨찾지 않은 것으로 본다
+export function parseFavorites(text: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(text)
+    return Array.isArray(parsed) ? parsed.filter((key): key is string => typeof key === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+// 즐겨찾는 포켓몬을 PC BOX 맨 앞에 모은다. 그 안과 나머지는 원래 순서를 지킨다
+export function favoritesFirst(box: readonly BoxEntry[], favorites: ReadonlySet<string>): BoxEntry[] {
+  return [...box.filter(entry => favorites.has(entry.key)), ...box.filter(entry => !favorites.has(entry.key))]
 }
 
 // 박스 key 가 있는 페이지. 막 진화한 포켓몬의 줄로 페이지를 넘길 때 쓴다

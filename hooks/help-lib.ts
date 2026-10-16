@@ -32,6 +32,8 @@ export function helpText(): string {
     '                a kept worktree shows why as "merged, cleanup on hold: ...".',
     '                With --plugin-dir, set options in ~/.claude/settings.json:',
     '                { "pluginConfigs": { "mod-hud": { "options": { "autoCleanup": true } } } }',
+    '  pokemonLanguage',
+    '                Language of Pokémon names: en (default) or ko.',
     '',
     'Files',
     '  ~/.claude/mod-sessions/          one status file per session (removed after a day)',
