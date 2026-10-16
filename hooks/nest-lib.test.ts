@@ -22,8 +22,13 @@ import {
   eggsOf,
   eggsOnScreen,
   emptyPokedex,
+  EVOLVE_FLASH_MS,
+  EVOLVE_MORPH_MS,
+  EVOLVE_START_MS,
+  evolvePhase,
   favoritesFirst,
   freshEggs,
+  isMorphNew,
   keeperOf,
   localDay,
   nestRows,
@@ -626,13 +631,38 @@ test('맡긴 포켓몬이 진화하는 동안은 풀밭 가운데 멈춰 서서 
     }
     return xs
   }
-  const frames = [0, 1, 2, 3, 4, 5, 6, 7].map(frame => drawDaycareGround([], width, frame, now, before))
-  // 진화 전과 뒤 모습이 모두 보인다
-  expect(frames.some(cells => columnsOf(cells, OLD).length > 0)).toBe(true)
-  expect(frames.some(cells => columnsOf(cells, NEW).length > 0)).toBe(true)
-  // 걷지 않고 가운데 서 있다
-  const xs = new Set(frames.map(cells => Math.min(...columnsOf(cells, OLD), ...columnsOf(cells, NEW))))
-  expect([...xs]).toEqual([9])
+  const WHITE = 0xffffff
+  const at = (elapsed: number, frame = 0) => drawDaycareGround([], width, frame, now, before, elapsed)
+  // 처음에는 진화 전 모습으로 서 있다
+  expect(columnsOf(at(0), OLD).length).toBeGreaterThan(0)
+  expect(columnsOf(at(0), NEW).length).toBe(0)
+  // 빛나는 동안은 하얀 실루엣이라 진화 전과 뒤 색이 모두 안 보인다
+  const morph = at(EVOLVE_START_MS + 100)
+  expect(columnsOf(morph, OLD).length + columnsOf(morph, NEW).length).toBe(0)
+  expect(columnsOf(morph, WHITE)).toContain(9)
+  // 번쩍일 때는 풀밭 전체가 하얗다
+  expect(new Set(columnsOf(at(EVOLVE_MORPH_MS + 100), WHITE)).size).toBe(width)
+  // 끝나면 진화 뒤 모습으로 가운데 서 있다
+  const done = [0, 1, 2, 3].map(frame => at(EVOLVE_FLASH_MS + 100, frame))
+  expect(done.every(cells => columnsOf(cells, OLD).length === 0 && Math.min(...columnsOf(cells, NEW)) === 9)).toBe(true)
+})
+
+test('진화 장면에서 진화 전과 뒤 모습이 번갈아 바뀌는 빠르기는 점점 빨라진다', () => {
+  const flipsIn = (from: number) => {
+    let flips = 0
+    for (let t = from; t < from + 1000; t += 10) {
+      if (isMorphNew(t) !== isMorphNew(t + 10)) {
+        flips++
+      }
+    }
+    return flips
+  }
+  expect(evolvePhase(0)).toBe('start')
+  expect(evolvePhase(EVOLVE_START_MS)).toBe('morph')
+  expect(evolvePhase(EVOLVE_MORPH_MS)).toBe('flash')
+  expect(evolvePhase(EVOLVE_FLASH_MS)).toBe('done')
+  expect(flipsIn(EVOLVE_START_MS)).toBeLessThanOrEqual(2)
+  expect(flipsIn(EVOLVE_MORPH_MS - 1000)).toBeGreaterThanOrEqual(3)
 })
 
 test('전설 등장 장면은 줄무늬로 덮이고 전설이 나타난 뒤 몬스터볼에 잡히며 아래 줄에 글이 바뀐다', () => {

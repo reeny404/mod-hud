@@ -63,6 +63,7 @@ import {
   drawPortrait,
   eggsOf,
   EVOLVE_MS,
+  evolvePhase,
   eggsOnScreen,
   emptyPokedex,
   favoritesFirst,
@@ -802,7 +803,8 @@ async function keepPokedex($: EngineInterface, sessions: SessionStatus[], now: n
       $.ui.toast(`Got an egg from the DAY CARE for ${egg.label}`)
     }
     for (const { entry, from } of grown.evolved) {
-      $.ui.toast(`What? ${await pokemonName($, home, from)} evolved into ${await pokemonName($, home, entry.species)}!`)
+      // 진화했다는 말은 패널의 진화 장면이 끝날 때 한다
+      $.ui.toast(`What? ${(await pokemonName($, home, from)).toUpperCase()} is evolving!`)
     }
     if (grown.dex.encounter && grown.dex.encounter.at === now) {
       $.ui.toast(`A wild ${(await pokemonName($, home, grown.dex.encounter.species)).toUpperCase()} appeared!`)
@@ -984,8 +986,16 @@ let boxPage = 0
 // 진화는 기록을 쓰는 세션이 적고 다른 세션은 30초마다 읽으므로, 깜빡임은 이 세션이 처음 본 때부터 센다
 let evolvingSeen = 0
 let evolvingSeenAt = 0
+// 이 진화를 처음 본 이 세션의 시각. 그림을 기다리느라 evolvingSeenAt 이 밀려도 그대로다
+let evolvingFirstAt = 0
 // 이보다 오래된 진화는 처음 봐도 깜빡이지 않는다. 다른 세션이 기록을 읽는 간격보다 넉넉하다
 const EVOLVING_FRESH_MS = 60 * 1000
+// 진화 전과 뒤 그림을 받을 때까지 진화 장면을 미룬다. 이만큼 기다려도 못 받으면 그림 없이 지나간다
+const EVOLVE_WAIT_MS = 30 * 1000
+// 진화 장면 아래 글 줄에 쓸 진화 전과 뒤 이름
+let evolvingNames: { from: string; to: string } | null = null
+// 마지막으로 그린 진화 장면 글. 바뀌면 다시 그린다
+let evolveCaptionDrawn: string | null = null
 // 이 패널이 마지막으로 본 전설 등장(기록에 적힌 시각)과, 그 등장 장면을 처음 보인 이 세션의 시각
 let arrivalSeen = 0
 // 보일 전설 장면. appear 는 줄무늬와 함께 나타나는 장면, catch 는 몬스터볼에 잡히는 장면. at 은 이 세션에서 장면을 시작할 시각
@@ -1065,7 +1075,33 @@ function daycareCells(scene: { columns: number; input: NestInput }, now: number)
   const walker = lead ? (lookupSprite(lead.species, WALKER_SIZE) ?? null) : undefined
   const evolving = evolvingOf(scene, now) && scene.input.evolving
   const before = evolving ? (lookupSprite(evolving.from, WALKER_SIZE) ?? null) : null
-  return base64Of(drawDaycareGround(scene.input.daycare, scene.columns, nestFrame, walker, before))
+  const elapsed = evolving ? now - evolving.at : 0
+  return base64Of(drawDaycareGround(scene.input.daycare, scene.columns, nestFrame, walker, before, elapsed))
+}
+
+// 진화 장면 아래 글 줄. 원작처럼 진화하는 동안과 끝난 뒤 글이 다르다
+function evolveCaption(scene: { input: NestInput }, now: number): string | null {
+  const evolving = evolvingOf(scene, now) && scene.input.evolving
+  if (!evolving || !evolvingNames) {
+    return null
+  }
+  const { from, to } = evolvingNames
+  return evolvePhase(now - evolving.at) === 'done'
+    ? `Congratulations! Your ${from} evolved into ${to}!`
+    : `What? ${from} is evolving!`
+}
+
+// 진화 전과 뒤 그림을 아직 못 받았으면 장면의 시작을 지금으로 미룬다. 처음 본 뒤 EVOLVE_WAIT_MS 가 지나면 그만 미룬다
+function holdEvolution(scene: { input: NestInput }, now: number) {
+  const evolving = scene.input.evolving
+  const entry = evolvingOf(scene, now)
+  if (!evolving || !entry || now - evolvingFirstAt >= EVOLVE_WAIT_MS) {
+    return
+  }
+  if (!lookupSprite(evolving.from, WALKER_SIZE) || !lookupSprite(entry.species, WALKER_SIZE)) {
+    evolving.at = now
+    evolvingSeenAt = now
+  }
 }
 
 function startNest($: EngineInterface) {
@@ -1096,6 +1132,11 @@ async function tickNest($: EngineInterface) {
   }
   nestFrame += 1
   const now = await $.clock.now()
+  holdEvolution(nestScene, now)
+  // 진화 장면의 글이 바뀌거나 사라지면 다시 그린다
+  if (evolveCaption(nestScene, now) !== evolveCaptionDrawn) {
+    $.ui.invalidate('ui.render')
+  }
   // 진화 장면이 끝나 풀밭에 설 포켓몬이 사라지면 풀밭 높이가 바뀌므로 칠하지 않고 다시 그린다
   if (!daycareCollapsed && daycareGroundRows(walkerOf(nestScene, now) !== undefined) !== daycareRowsDrawn) {
     $.ui.invalidate('ui.render')
@@ -1562,9 +1603,19 @@ export const register: Register = (on, options) => {
       if (dex.evolving && dex.evolving.at !== evolvingSeen && now - dex.evolving.at < EVOLVING_FRESH_MS) {
         evolvingSeen = dex.evolving.at
         evolvingSeenAt = now
+        evolvingFirstAt = now
+        // 원작처럼 진화 장면은 놓치지 않게 접힌 키우미집을 편다
+        daycareCollapsed = false
         boxPage = boxPageOfKey({ eggs: [], daycare: [], box, boxPage }, dex.evolving.key)
       }
       const evolving = dex.evolving && dex.evolving.at === evolvingSeen ? { ...dex.evolving, at: evolvingSeenAt } : null
+      const grown = evolving && dex.box.find(entry => entry.key === evolving.key)
+      evolvingNames = grown
+        ? {
+            from: (await shownName($, home, evolving.from)).toUpperCase(),
+            to: (await shownName($, home, grown.species)).toUpperCase(),
+          }
+        : null
       // 막 온 전설을 처음 보면 이 세션의 시각부터 등장 장면을 센다
       if (dex.scene && dex.scene.at !== arrivalSeen && now - dex.scene.at < EVOLVING_FRESH_MS) {
         arrivalSeen = dex.scene.at
@@ -1899,6 +1950,13 @@ export const register: Register = (on, options) => {
                 rows={(daycareRowsDrawn = daycareGroundRows(walkerOf(nestScene, now) !== undefined))}
                 cells={daycareCells(nestScene, now)}
               />
+            )}
+            {(evolveCaptionDrawn = evolveCaption(nestScene, now)) && (
+              <Box paddingX={1}>
+                <Text bold wrap="truncate-end">
+                  {evolveCaptionDrawn}
+                </Text>
+              </Box>
             )}
             <Box backgroundColor="#3a6ea5" width={nestScene.columns} paddingX={1} marginTop={1}>
               {/* 머리줄을 누르면 박스를 접거나 편다 */}

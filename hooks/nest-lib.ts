@@ -33,8 +33,31 @@ export type SpriteLookup = (species: number, size: number) => Pixels | undefined
 export const HATCHED_SIZE = 24
 // 키우미집을 걷는 포켓몬은 이 안에 들어가게 줄인다. 큰 포켓몬(원본 32점 남짓)을 이보다 작게 줄이면 눈과 팔다리가 사라진다
 export const ICON_SIZE = 20
-// 막 진화한 포켓몬이 진화 전과 뒤 그림을 번갈아 그리는 시간
-export const EVOLVE_MS = 4000
+// 막 진화한 포켓몬의 진화 장면. 원작처럼 진화 전 모습으로 잠깐 서 있다가(start), 하얗게 빛나며 진화 전과 뒤 모습을
+// 번갈아 보이고 점점 빨라진 뒤(morph), 화면이 번쩍이고(flash), 새 모습으로 선다(done). 값은 장면이 시작한 뒤 ms 다
+export const EVOLVE_START_MS = 2000
+export const EVOLVE_MORPH_MS = 9000
+export const EVOLVE_FLASH_MS = 9750
+export const EVOLVE_MS = 13000
+export type EvolvePhase = 'start' | 'morph' | 'flash' | 'done'
+
+export function evolvePhase(elapsed: number): EvolvePhase {
+  if (elapsed < EVOLVE_START_MS) {
+    return 'start'
+  }
+  if (elapsed < EVOLVE_MORPH_MS) {
+    return 'morph'
+  }
+  return elapsed < EVOLVE_FLASH_MS ? 'flash' : 'done'
+}
+
+// morph 동안 이 순간 진화 뒤 모습이 보이는지. 처음엔 1초에 한 번 바뀌고 끝에는 1초에 네 번 바뀐다
+export function isMorphNew(elapsed: number): boolean {
+  const t = Math.max(0, elapsed - EVOLVE_START_MS) / 1000
+  const span = (EVOLVE_MORPH_MS - EVOLVE_START_MS) / 1000
+  const flips = t + (3 / (2 * span)) * t * t
+  return Math.floor(flips) % 2 === 1
+}
 // 부화한 뒤 높이 뛰며 반짝이는 시간
 export const CELEBRATE_MS = 90 * 1000
 // /clear 나 /resume 로 끝난 세션의 알을 이어 받을 세션이 나타나길 기다리는 시간
@@ -691,6 +714,11 @@ export function eggSprite(key: string, stage: 'egg' | 'cracked', angle: number):
 }
 
 // 반짝이는 별을 width x height 칸 안에 흩뿌린다
+// 몸 모양 그대로 하얗게 칠한 그림
+function silhouette(image: Pixels): Pixels {
+  return { ...image, px: image.px.map(color => (color === CLEAR ? CLEAR : C.sparkleHot)) }
+}
+
 function drawSparkles(canvas: Canvas, x: number, y: number, width: number, height: number, frame: number) {
   const spots = [
     [0.05, 0.25],
@@ -968,22 +996,36 @@ export function daycareGroundRows(hasWalker: boolean): number {
 
 // 키우미집 풀밭과 맡긴 작은 알. 알이 없어도 그린다
 // walker 는 맡긴 포켓몬 그림. 주면 풀밭을 높여 그 포켓몬이 좌우로 걷게 한다. null 이면 풀밭만 높이고 아무도 걷지 않는다
-// before 는 막 진화한 포켓몬의 진화 전 그림. 주면 걷지 않고 가운데 서서 진화 전과 뒤 모습을 번갈아 보이며 반짝인다
+// before 는 막 진화한 포켓몬의 진화 전 그림. 주면 걷지 않고 가운데 서서 진화 장면(evolvePhase)을 보인다. elapsed 는 장면이 시작한 뒤 ms 다
 export function drawDaycareGround(
   daycare: HeldEgg[],
   width: number,
   frame: number,
   walker?: Pixels | null,
   before?: Pixels | null,
+  elapsed = 0,
 ): Uint32Array {
   const ground = canvasOf(width, daycareGroundRows(walker !== undefined) * 2)
   drawDaycare(ground, daycare, frame)
   if (walker && before) {
-    // 원작처럼 두 프레임마다 진화 전과 뒤 모습을 번갈아 그린다
-    const image = Math.floor(frame / 2) % 2 === 0 ? before : walker
+    const phase = evolvePhase(elapsed)
+    // 빛나는 동안은 원작처럼 하얀 실루엣으로 진화 전과 뒤 모습을 번갈아 그린다
+    const image =
+      phase === 'start' ? before : phase === 'morph' ? silhouette(isMorphNew(elapsed) ? walker : before) : walker
     const x = Math.floor((width - image.width) / 2)
-    blit(ground, x, ground.height - image.height, image)
-    drawSparkles(ground, x - 2, 0, image.width + 4, ground.height, frame)
+    if (phase === 'flash') {
+      // 다 빛나면 풀밭 전체가 하얗게 번쩍인다
+      for (let y = 0; y < ground.height; y++) {
+        for (let dx = 0; dx < width; dx++) {
+          put(ground, dx, y, C.sparkleHot)
+        }
+      }
+    } else {
+      blit(ground, x, ground.height - image.height, image)
+    }
+    if (phase === 'morph' || phase === 'done') {
+      drawSparkles(ground, x - 2, 0, image.width + 4, ground.height, frame)
+    }
   } else if (walker) {
     // 오른쪽 끝에서 왼쪽으로 한 칸씩 걷다가 끝에 닿으면 돌아온다. 아이콘은 왼쪽을 보므로 오른쪽으로 갈 때 뒤집는다
     const range = Math.max(1, width - walker.width)

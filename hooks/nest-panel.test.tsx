@@ -216,6 +216,8 @@ test('다른 세션이 조금 전에 적은 진화도 이 패널이 처음 보�
   expect(nodes(await pane.drawn(), 'Button', { key: 'box-row-d' }).length).toBe(1)
   // 최종 진화형이 되어 맡긴 포켓몬이 풀려도, 진화 장면을 보이는 동안은 풀밭에 그 포켓몬이 서 있다
   expect(nodes(await pane.drawn(), 'Raster', { key: 'daycare', rows: 11 }).length).toBe(1)
+  // 원작처럼 풀밭 아래에 진화하는 중이라는 글이 보인다
+  expect(await pane.find({ type: 'Text', text: /What\? RATTATA is evolving!/ })).toBeDefined()
   await pane.unmount()
 })
 
