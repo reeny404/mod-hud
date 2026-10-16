@@ -666,8 +666,8 @@ const ENCOUNTER_FILE = '.claude/mod-hud-encounter'
 const FAVORITES_FILE = '.claude/mod-hud-favorites.json'
 // 한 번 펼쳐 본 박스 key. 펼쳐 본 포켓몬은 NEW 가 사라진다. 다른 세션도 다음 조회 때 읽는다
 const SEEN_FILE = '.claude/mod-hud-seen.json'
-// 박스에 들어온 지 이만큼 안 된 포켓몬은 펼쳐 보기 전까지 이름 뒤에 NEW 가 붙는다. 밤사이 머지돼도 다음 날 보이게 하루로 둔다
-const NEW_MS = 24 * 60 * 60 * 1000
+// 박스에 들어온 지 이만큼 안 된 포켓몬은 펼쳐 보기 전까지 이름 뒤에 NEW 가 붙는다. 길면 박스가 온통 NEW 라 한 시간으로 둔다
+const NEW_MS = 60 * 60 * 1000
 // 세션이 닫힌 뒤 머지를 기다리는 알의 MR 을 다시 조회하는 간격
 const PENDING_CHECK_MS = 2 * 60 * 1000
 
