@@ -86,6 +86,16 @@ test('최종 진화형이 맡겨져 있으면 경험치가 쌓이지 않는다',
   expect(dex.xp).toBe(0)
 })
 
+test('진화하지 않는 메타몽도 Leave at DAY CARE 로 맡길 수 있고, 맡긴 동안은 경험치가 쌓이지 않는다', () => {
+  const box = [entry('ditto', 132, 9), entry('p', 16, 5)]
+  const { dex } = advanceEvolution(dexOf({ box, lead: 'p', xp: 1000, xpAt: NOW - 60_000 }), [session('a')], NOW, 'ditto')
+  expect(dex.lead).toBe('ditto')
+  expect(dex.chosen).toBe(true)
+  expect(dex.xp).toBe(1000)
+  // 없는 key 를 고르면 그대로 둔다
+  expect(advanceEvolution(dexOf({ box, lead: 'p', chosen: true }), [], NOW, 'nope').dex.lead).toBe('p')
+})
+
 test('Take back 을 누르면 키우미집에서 데려오고 다른 포켓몬이 자동으로 맡겨진다', () => {
   const box = [entry('z', 6, 0), entry('p', 16, 5)]
   const { dex } = advanceEvolution(dexOf({ box, lead: 'z', chosen: true }), [], NOW, TAKE_BACK)
@@ -155,10 +165,10 @@ test('앞장을 바꿔도 경험치는 남는다', () => {
   expect(dex.xp).toBe(1000)
 })
 
-test('없는 포켓몬이나 진화할 수 없는 포켓몬을 앞장세우는 요청은 무시한다', () => {
+test('박스에 없는 포켓몬을 맡기는 요청은 무시하고, 최종 진화형은 맡길 수 있다', () => {
   const dex = dexOf({ box: [entry('a', 1), entry('z', 6, 5)], lead: 'a' })
   expect(advanceEvolution(dex, [], NOW, 'nope').dex.lead).toBe('a')
-  expect(advanceEvolution(dex, [], NOW, 'z').dex.lead).toBe('a')
+  expect(advanceEvolution(dex, [], NOW, 'z').dex.lead).toBe('z')
   // 앞장선 포켓몬이 박스에서 사라졌으면 자동으로 다시 고른다
   expect(advanceEvolution(dexOf({ box: [entry('b', 1)], lead: 'gone', chosen: true }), [], NOW).dex.lead).toBe('b')
 })

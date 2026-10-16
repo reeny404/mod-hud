@@ -20,6 +20,7 @@ import {
   drawNest,
   eggSprite,
   eggsOf,
+  eggsOnScreen,
   emptyPokedex,
   freshEggs,
   keeperOf,
@@ -664,5 +665,19 @@ test('전설 등장 장면의 그림은 아래 글 줄에 닿지 않게 한 줄�
     const i = (lastPictureRow * width + x) * 3
     expect(cells[i + 1]).not.toBe(0x123456)
     expect(cells[i + 2]).not.toBe(0x123456)
+  }
+})
+
+test('알 칸은 16칸이라 폭 48 에 알이 한 줄에 셋씩 두 줄 들어간다', () => {
+  const nest = { label: 'a', species: 0, isShaking: true, activity: null, hatchedAt: null, stage: 'egg' as const }
+  const eggs = Array.from({ length: 7 }, (_, i) => ({ ...nest, key: `e${i}` }))
+  const input = { eggs, daycare: [], box: [], boxPage: 0 }
+  expect(eggsOnScreen(input, 48).length).toBe(6)
+  expect(eggsOnScreen(input, 47).length).toBe(4)
+  // 가장 크게 기운 알도 칸 밖으로 나가지 않아 옆 알과 겹치지 않는다
+  for (const angle of [-25, 25]) {
+    const rows = eggSprite('e1', 'egg', angle)
+    const xs = rows.flatMap(row => [...row].flatMap((c, x) => (c === '.' ? [] : [x])))
+    expect(Math.max(...xs) - Math.min(...xs) + 1).toBeLessThanOrEqual(16)
   }
 })

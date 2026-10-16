@@ -47,7 +47,8 @@ const DONE_MAX = 500
 const EGG_ROWS_MAX = 2
 
 // 알 칸과 부화한 포켓몬 칸의 폭, 그림 줄 수. 알만 있는 줄은 낮게, 포켓몬이 있는 줄만 높게 그린다
-const EGG_SLOT = 20
+// 알 칸은 가장 크게 기운 알(16칸)이 딱 들어가는 폭이다. 좁은 패널에도 한 줄에 알이 많이 들어가게 한다
+const EGG_SLOT = 16
 const EGG_ROWS = 8
 const HATCHED_SLOT = 24
 const HATCHED_ROWS = 14

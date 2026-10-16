@@ -371,8 +371,11 @@ async function refreshSessions($: EngineInterface) {
 
 // 저장소의 worktree 와 MR
 
+// 포켓몬 이름을 쓸 언어. PokeAPI 의 언어 이름이다
+type PokemonLanguage = 'en' | 'ko'
+
 // plugin.json 의 userConfig. register 가 받은 값으로 채운다
-const config = { gitlabUrl: '', baseBranch: '', autoCleanup: false }
+const config = { gitlabUrl: '', baseBranch: '', autoCleanup: false, pokemonLanguage: 'en' as PokemonLanguage }
 
 const LINEAR_TTL_MS = 5 * 60 * 1000
 // 파일을 읽어 조회 주기가 됐는지 보는 간격. 파일만 읽으므로 짧아도 된다
@@ -854,7 +857,20 @@ async function loadSprite($: EngineInterface, species: number) {
   }
 }
 
-// 영어 이름. 파일에서 한 번 읽어 메모리에 두고, 모르는 이름은 PokeAPI 에서 받아 파일에 더한다
+// 펼친 박스 줄에 그릴 도트. 아직 없으면 받아 온 뒤 다시 그린다
+function loadOpened($: EngineInterface, species: number) {
+  if (sprites.has(species)) {
+    return
+  }
+  void loadSprite($, species).then(() => {
+    if (sprites.get(species)) {
+      $.ui.invalidate('ui.render')
+    }
+  })
+}
+
+// 설정한 언어의 이름. 파일에서 한 번 읽어 메모리에 두고, 모르는 이름은 PokeAPI 에서 받아 파일에 더한다. 언어마다 파일을 따로 둔다
+const namesPath = (home: string) => `${home}/${SPRITE_DIR}/names-${config.pokemonLanguage}.json`
 const names = new Map<number, string>()
 // 이 세션에서 받으려다 실패한 종. 패널을 그릴 때마다 네트워크를 다시 부르지 않는다
 const namesFailed = new Set<number>()
@@ -864,7 +880,7 @@ let namesRead: Promise<void> | null = null
 function readNames($: EngineInterface, home: string): Promise<void> {
   namesRead ??= (async () => {
     try {
-      const saved = JSON.parse(await $.fs.read(`${home}/${SPRITE_DIR}/names-en.json`)) as Record<string, string>
+      const saved = JSON.parse(await $.fs.read(namesPath(home))) as Record<string, string>
       for (const [species, name] of Object.entries(saved)) {
         names.set(Number(species), name)
       }
@@ -884,13 +900,13 @@ function fetchName($: EngineInterface, home: string, species: number): Promise<s
     try {
       const res = await $.http.fetch(speciesUrl(species))
       const parsed = res.ok ? (JSON.parse(res.text) as { names?: { name: string; language: { name: string } }[] }) : null
-      const name = parsed?.names?.find(one => one.language.name === 'en')?.name
+      const name = parsed?.names?.find(one => one.language.name === config.pokemonLanguage)?.name
       if (!name) {
         namesFailed.add(species)
         return null
       }
       names.set(species, name)
-      await $.fs.write(`${home}/${SPRITE_DIR}/names-en.json`, JSON.stringify(Object.fromEntries(names)))
+      await $.fs.write(namesPath(home), JSON.stringify(Object.fromEntries(names)))
       return name
     } catch {
       namesFailed.add(species)
@@ -1158,14 +1174,41 @@ async function isPaneUp($: EngineInterface): Promise<boolean> {
   return (await $.ui.panes()).some(pane => pane.id === PANE)
 }
 
+// Refresh now 를 누른 뒤 다시 누를 수 없는 시간. 그동안 버튼 자리에 조회 중인지, 끝났는지를 보인다
+const MANUAL_REFRESH_LOCK_MS = 60 * 1000
+// Refresh now 를 누른 시각과 그 조회가 끝났는지. 누른 적 없으면 null 이다
+let manualRefresh: { at: number; isDone: boolean } | null = null
+
 async function refreshAll($: EngineInterface) {
   await Promise.all([refreshSessions($), refreshIssues($, true), refreshInbox($, true)])
+}
+
+async function refreshByHand($: EngineInterface) {
+  const at = await $.clock.now()
+  manualRefresh = { at, isDone: false }
+  $.ui.invalidate('ui.render')
+  $.clock.after(MANUAL_REFRESH_LOCK_MS, () => {
+    if (manualRefresh?.at === at) {
+      manualRefresh = null
+      $.ui.invalidate('ui.render')
+    }
+  })
+  try {
+    await refreshAll($)
+  } finally {
+    if (manualRefresh?.at === at) {
+      manualRefresh = { at, isDone: true }
+      $.ui.invalidate('ui.render')
+    }
+  }
 }
 
 export const register: Register = (on, options) => {
   config.gitlabUrl = typeof options.gitlabUrl === 'string' ? options.gitlabUrl : ''
   config.baseBranch = typeof options.baseBranch === 'string' ? options.baseBranch : ''
   config.autoCleanup = options.autoCleanup === true
+  // 모르는 값이면 영어로 둔다
+  config.pokemonLanguage = options.pokemonLanguage === 'ko' ? 'ko' : 'en'
 
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -1520,12 +1563,16 @@ export const register: Register = (on, options) => {
       }
       boxRows = new Map()
       for (const entry of boxOnPage(input)) {
+        if (entry.key === boxOpen) {
+          loadOpened($, entry.species)
+        }
         // 다음 진화는 진화할 때까지 보이지 않는다
         boxRows.set(entry.key, {
           name: await shownName($, home, entry.species),
           types: typesOf(entry.species),
           caught: localDay(entry.at),
-          canLead: canEvolve(entry.species) && entry.key !== dex.lead,
+          // 진화하지 않는 포켓몬도 맡길 수 있다. 맡긴 동안은 머리줄에 MAX 로 보인다
+          canLead: entry.key !== dex.lead,
         })
       }
       const walking = dex.box.find(entry => entry.key === dex.lead)
@@ -1554,7 +1601,11 @@ export const register: Register = (on, options) => {
                 {ICON.inbox} Linear {freshness(notes.fetchedAt, INBOX_TTL_MS, now)}
               </Text>
             )}
-            <Button key="refresh" label="Refresh now" onPress={() => refreshAll($)} />
+            {manualRefresh && now - manualRefresh.at < MANUAL_REFRESH_LOCK_MS ? (
+              <Text dimColor>{manualRefresh.isDone ? '✓ Refreshed · again in 1m' : 'Refreshing…'}</Text>
+            ) : (
+              <Button key="refresh" label="Refresh now" onPress={() => refreshByHand($)} />
+            )}
           </Box>
 
           {notes.isOk && (
@@ -1864,6 +1915,15 @@ export const register: Register = (on, options) => {
                       </Box>
                       {boxOpen === entry.key && (
                         <Box flexDirection="column" paddingX={4}>
+                          {(() => {
+                            // 펼친 포켓몬은 원본 크기 도트로 보인다. 받기 전에는 글자만 보인다
+                            const image = drawPortrait(entry.species, lookupSprite)
+                            return (
+                              image && (
+                                <Raster key={`box-portrait-${entry.key}`} columns={image.columns} rows={image.rows} cells={base64Of(image.cells)} />
+                              )
+                            )
+                          })()}
                           <Text dimColor wrap="truncate-end">
                             caught {row.caught} · {entry.label}
                           </Text>

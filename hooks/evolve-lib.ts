@@ -46,7 +46,7 @@ export function autoLead(box: readonly BoxEntry[]): string | null {
   return firstCaught(crowded.length > 0 ? crowded : able)?.key ?? null
 }
 
-// pick 은 사용자가 Leave at DAY CARE 를 누른 박스 칸의 key, 또는 Take back 을 누른 TAKE_BACK
+// pick 은 사용자가 Leave at DAY CARE 를 누른 박스 key, 또는 Take back 을 누른 TAKE_BACK
 // evolved 는 이번에 진화한 칸과 진화 전 종, legends 는 이번에 박스에 들어온 전설
 // action 은 야생 전설에게 누른 버튼
 // legends 는 이번에 잡은 전설, fled 는 이번에 달아난 전설
@@ -69,7 +69,8 @@ export function advanceEvolution(
   if (pick === TAKE_BACK) {
     lead = null
     chosen = false
-  } else if (pick !== null && able(pick)) {
+  } else if (pick !== null && box.some(one => one.key === pick)) {
+    // 진화하지 않는 포켓몬(메타몽 등)과 최종 진화형도 맡길 수 있다. 맡긴 동안은 MAX 라 경험치가 쌓이지 않는다
     lead = pick
     chosen = true
   } else if (!box.some(one => one.key === lead)) {

@@ -24,6 +24,16 @@
       "title": "Auto cleanup merged worktrees",
       "description": "MR 이 머지됐고 남은 변경이 없는 worktree 와 그 로컬 브랜치를 자동으로 지운다",
       "default": false
+    },
+    "pokemonLanguage": {
+      "type": "string",
+      "title": "Pokémon name language",
+      "description": "포켓몬 이름을 쓸 언어. en 은 영어, ko 는 한국어",
+      "options": [
+        "en",
+        "ko"
+      ],
+      "default": "en"
     }
   }
 }
