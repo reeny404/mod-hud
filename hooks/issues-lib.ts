@@ -29,6 +29,25 @@ export const gitlabProjectApi = (remote: string, override = ''): string | null =
   return `${base}/api/v4/projects/${encodeURIComponent(path)}`
 }
 
+// remote 가 GitHub 저장소인지. GitHub 는 API 대신 gh CLI 로 PR 을 찾는다
+export const isGithubRemote = (remote: string): boolean =>
+  /^(?:https?:\/\/(?:[^@/]+@)?|ssh:\/\/(?:[^@/]+@)?|(?:[^@/]+@)?)github\.com[:/]/.test(remote.trim())
+
+// `gh pr list --json number,state,headRefOid,url,mergeable` 출력의 첫 PR 을 GitLab MR 과 같은 모양으로 바꾼다
+export const parseGithubPr = (stdout: string): Mr | null => {
+  try {
+    const [pr] = JSON.parse(stdout) as Array<{ number: number; state: string; headRefOid: string; url: string; mergeable?: string }>
+    if (!pr) {
+      return null
+    }
+    const state = pr.state === 'OPEN' ? 'opened' : pr.state === 'MERGED' ? 'merged' : 'closed'
+    const action = state !== 'opened' ? null : pr.mergeable === 'CONFLICTING' ? 'conflict' : pr.mergeable === 'MERGEABLE' ? 'mergeable' : null
+    return { iid: pr.number, state, sha: pr.headRefOid, url: pr.url, action }
+  } catch {
+    return null
+  }
+}
+
 // `git symbolic-ref refs/remotes/origin/HEAD` 출력에서 기본 브랜치 이름을 뽑는다
 export const parseDefaultBranch = (symbolicRef: string): string | null =>
   symbolicRef.trim().match(/^refs\/remotes\/origin\/(.+)$/)?.[1] ?? null

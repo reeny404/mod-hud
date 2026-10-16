@@ -23,7 +23,7 @@ const ROW: Row = {
 
 // 파일은 메모리에 두고, git worktree list 를 몇 번 불렀는지 센다
 // branch 를 주면 git 이 그 브랜치를 알려 주고, 상태 파일 폴더도 메모리의 파일로 읽는다
-const setup = (on: On, files: Map<string, string>, branch?: string) => {
+const setup = (on: On, files: Map<string, string>, branch?: string, remote = 'git@host:acme/dev/team/app.git') => {
   const calls = { worktreeList: 0 }
   on('env.get', () => ({ value: '/home/test' }))
   // 상태 파일 폴더만 메모리의 파일로 읽는다
@@ -50,13 +50,20 @@ const setup = (on: On, files: Map<string, string>, branch?: string) => {
     if (argv[1] === 'worktree' && argv[2] === 'list') {
       calls.worktreeList += 1
     }
-    const stdout = branch !== undefined && argv[1] === 'branch' && argv[2] === '--show-current' ? `${branch}\n` : ''
+    // GitHub 저장소에서는 gh 가 이 브랜치의 PR 이 머지됐다고 알려 준다
+    const pr = JSON.stringify([{ number: 9, state: 'MERGED', headRefOid: 's', url: 'https://github.com/me/app/pull/9', mergeable: 'UNKNOWN' }])
+    const stdout =
+      branch !== undefined && argv[1] === 'branch' && argv[2] === '--show-current'
+        ? `${branch}\n`
+        : argv[0] === 'gh' && argv[1] === 'pr'
+          ? pr
+          : ''
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('command.register', () => ({ value: { name: 'x' } }) as never)
   on('session.id', () => ({ value: 'self' }))
   on('session.cwd', () => ({ value: '/r/my-app' }))
-  on('session.repo', () => ({ value: { root: '/r/my-app', remote: 'git@host:acme/dev/team/app.git' } }) as never)
+  on('session.repo', () => ({ value: { root: '/r/my-app', remote } }) as never)
   on('ui.panes', () => ({ value: [] }))
   on('mcp.call', () => {
     throw new Error('not connected')
@@ -117,4 +124,19 @@ test('세션 브랜치의 MR 을 아직 찾아보지 않았으면 주기 전이�
   expect(status.branch).toBe('feat/ABC-7-new')
   expect(status.mrBranch).toBe('feat/ABC-7-new')
   expect(status.mrState).toBe('merged')
+})
+
+test('GitHub 저장소는 gh 로 PR 을 찾아 MR 상태를 적고, 패널 맨 위에 연결된 저장소와 이 브랜치의 PR 을 보인다', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const files = new Map([[FILE, cache({ fetchedAt: NOW - 60 * 1000, checked: [] })]])
+  setup(on, files, 'feat/ABC-7-new', 'https://github.com/me/app.git')
+  await $.session.start({ source: 'startup', cwd: '/r/my-app' } as never)
+  await clock.advance(1000)
+  const status = JSON.parse(files.get('/home/test/.claude/mod-sessions/self.json') ?? '{}') as SessionStatus
+  expect(status.mrState).toBe('merged')
+
+  const pane = await $.ui.mount({ plugin: 'mod-hud', surface: 'terminal', component: 'Pane', requestId: 'mod-hud', props: {} as never } as never)
+  expect(await pane.find({ type: 'Text', text: /GitHub me\/app · / })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /feat\/ABC-7-new · PR #9 merged/ })).toBeDefined()
+  await pane.unmount()
 })

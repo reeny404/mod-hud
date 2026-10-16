@@ -34,11 +34,13 @@ import {
   emptyIssuesCache,
   findCheck,
   gitlabProjectApi,
+  isGithubRemote,
   isLongLivedBranch,
   issuesFileOf,
   ISSUES_TTL_MS,
   mrAction,
   parseDefaultBranch,
+  parseGithubPr,
   parseIssue,
   parseIssuesCache,
   parseWorktrees,
@@ -63,13 +65,14 @@ import {
   drawPortrait,
   eggsOf,
   EVOLVE_MS,
+  evolvePhase,
   eggsOnScreen,
   emptyPokedex,
   favoritesFirst,
   keeperOf,
   localDay,
   nestRows,
-  parseFavorites,
+  parseKeys,
   parsePokedex,
   speciesToLoad,
   updatePending,
@@ -392,7 +395,15 @@ const issuesMeta = atom({ plugin: 'mod-hud', key: 'issuesMeta' } as const, {
 })
 
 // 세션이 열린 git 저장소. api 는 GitLab 프로젝트 API 주소이고 GitLab 이 아니면 null, base 는 커밋 수를 셀 기준 브랜치
-type RepoInfo = { root: string; api: string | null; base: string }
+// host 는 MR 을 찾는 곳(GitHub 는 gh CLI), name 은 패널에 보일 저장소 이름, problem 은 MR 을 못 찾는 까닭
+type RepoInfo = {
+  root: string
+  api: string | null
+  base: string
+  host: 'gitlab' | 'github' | null
+  name: string | null
+  problem: string | null
+}
 
 // undefined 는 아직 안 봄, null 은 git 저장소가 아님
 let repoInfo: RepoInfo | null | undefined
@@ -405,10 +416,25 @@ async function ensureRepo($: EngineInterface): Promise<RepoInfo | null> {
       repoInfo = null
     } else {
       const head = config.baseBranch ? null : await git($, repo.root, ['symbolic-ref', 'refs/remotes/origin/HEAD'])
+      const api = repo.remote ? gitlabProjectApi(repo.remote, config.gitlabUrl) : null
+      const host = api ? 'gitlab' : repo.remote && isGithubRemote(repo.remote) ? 'github' : null
       repoInfo = {
         root: repo.root,
-        api: repo.remote ? gitlabProjectApi(repo.remote, config.gitlabUrl) : null,
+        api,
         base: config.baseBranch || (head && parseDefaultBranch(head)) || 'main',
+        host,
+        name: repo.remote?.trim().match(/([^/:]+\/[^/:]+?)(?:\.git)?\/?$/)?.[1] ?? null,
+        problem: !repo.remote
+          ? 'no remote'
+          : host === 'gitlab'
+            ? (await readToken($, repo.root))
+              ? null
+              : 'no GITLAB_TOKEN'
+            : host === 'github'
+              ? (await isGhReady($, repo.root))
+                ? null
+                : 'gh not signed in'
+              : 'not GitLab or GitHub',
       }
     }
   }
@@ -438,6 +464,25 @@ async function fetchMr($: EngineInterface, api: string, token: string, branch: s
   }
   const [mr] = JSON.parse(res.text) as Array<Parameters<typeof mrAction>[0] & { iid: number; sha: string; web_url: string }>
   return mr ? { iid: mr.iid, state: mr.state, sha: mr.sha, url: mr.web_url, action: mrAction(mr) } : null
+}
+
+async function isGhReady($: EngineInterface, cwd: string): Promise<boolean> {
+  try {
+    return (await $.process.run(['gh', 'auth', 'status'], { cwd })).exitCode === 0
+  } catch {
+    return false
+  }
+}
+
+// GitHub 는 gh CLI 로 브랜치의 가장 최근 PR 을 찾는다. gh 가 없거나 로그인하지 않았으면 null
+async function fetchPr($: EngineInterface, cwd: string, branch: string): Promise<Mr | null> {
+  try {
+    const fields = 'number,state,headRefOid,url,mergeable'
+    const ran = await $.process.run(['gh', 'pr', 'list', '--head', branch, '--state', 'all', '--limit', '1', '--json', fields], { cwd })
+    return ran.exitCode === 0 ? parseGithubPr(ran.stdout) : null
+  } catch {
+    return null
+  }
 }
 
 async function fetchLinear($: EngineInterface, issue: string, now: number): Promise<string | null> {
@@ -477,13 +522,14 @@ async function cleanup($: EngineInterface, root: string, row: Row): Promise<stri
 }
 
 // git, GitLab, Linear 를 불러 worktree 목록을 새로 만든다. 조회를 맡은 세션만 부른다
-async function collectIssues($: EngineInterface, { root, api, base }: RepoInfo, now: number) {
+async function collectIssues($: EngineInterface, { root, api, base, host }: RepoInfo, now: number) {
   const listed = await $.process.run(['git', 'worktree', 'list', '--porcelain'], { cwd: root })
   const trees = parseWorktrees(listed.stdout)
   const allSessions = await readSessions($)
   const sessions = assignSessions(trees, allSessions, now)
   const token = api ? await readToken($, root) : null
-  const findMr = (branch: string) => (api && token ? fetchMr($, api, token, branch) : null)
+  const findMr = (branch: string) =>
+    api && token ? fetchMr($, api, token, branch) : host === 'github' ? fetchPr($, root, branch) : null
   const ownCwd = await $.session.cwd()
 
   const next: Row[] = []
@@ -618,6 +664,10 @@ const LEAD_FILE = '.claude/mod-hud-lead'
 const ENCOUNTER_FILE = '.claude/mod-hud-encounter'
 // 즐겨찾는 박스 key. 기록과 따로 두어 어느 세션에서 눌러도 바로 쓰고, 다른 세션은 다음 조회 때 읽는다
 const FAVORITES_FILE = '.claude/mod-hud-favorites.json'
+// 한 번 펼쳐 본 박스 key. 펼쳐 본 포켓몬은 NEW 가 사라진다. 다른 세션도 다음 조회 때 읽는다
+const SEEN_FILE = '.claude/mod-hud-seen.json'
+// 박스에 들어온 지 이만큼 안 된 포켓몬은 펼쳐 보기 전까지 이름 뒤에 NEW 가 붙는다. 길면 박스가 온통 NEW 라 한 시간으로 둔다
+const NEW_MS = 60 * 60 * 1000
 // 세션이 닫힌 뒤 머지를 기다리는 알의 MR 을 다시 조회하는 간격
 const PENDING_CHECK_MS = 2 * 60 * 1000
 
@@ -627,6 +677,7 @@ const eggs = atom({ plugin: 'mod-hud', key: 'eggs' } as const, [])
 let pendingCheckedAt = 0
 // 즐겨찾는 포켓몬은 PC BOX 맨 앞에 모이고 이름 앞에 ♥ 가 붙는다
 let favorites = new Set<string>()
+let seen = new Set<string>()
 // 이 패널에서 박스로 보낸 알. 기록을 쓰는 세션이 반영할 때까지 기록을 다시 읽어도 패널에 되살리지 않는다
 const sending = new Set<string>()
 
@@ -649,7 +700,12 @@ async function refreshPending($: EngineInterface, dex: Pokedex): Promise<Pokedex
       const remote = (await git($, egg.root, ['remote', 'get-url', 'origin']))?.trim()
       const api = remote ? gitlabProjectApi(remote, config.gitlabUrl) : null
       const token = api ? await readToken($, egg.root) : null
-      const mr = api && token ? await fetchMr($, api, token, egg.branch) : null
+      const mr =
+        api && token
+          ? await fetchMr($, api, token, egg.branch)
+          : remote && isGithubRemote(remote)
+            ? await fetchPr($, egg.root, egg.branch)
+            : null
       if (mr && mr.state !== egg.mrState) {
         next = updatePending(next, egg.key, mr.state)
       }
@@ -678,10 +734,10 @@ async function sendToBox($: EngineInterface, key: string) {
   void refreshSessions($)
 }
 
-async function readFavorites($: EngineInterface, home: string): Promise<Set<string>> {
+async function readKeys($: EngineInterface, home: string, file: string): Promise<Set<string>> {
   try {
-    const path = `${home}/${FAVORITES_FILE}`
-    return new Set((await $.fs.exists(path)) ? parseFavorites(await $.fs.read(path)) : [])
+    const path = `${home}/${file}`
+    return new Set((await $.fs.exists(path)) ? parseKeys(await $.fs.read(path)) : [])
   } catch {
     return new Set()
   }
@@ -693,7 +749,7 @@ async function toggleFavorite($: EngineInterface, key: string) {
     return
   }
   // 다른 세션에서 바꾼 것을 덮지 않게 파일을 다시 읽고 고친다
-  const next = await readFavorites($, home)
+  const next = await readKeys($, home, FAVORITES_FILE)
   if (next.has(key)) {
     next.delete(key)
   } else {
@@ -701,6 +757,19 @@ async function toggleFavorite($: EngineInterface, key: string) {
   }
   await $.fs.write(`${home}/${FAVORITES_FILE}`, JSON.stringify([...next]))
   favorites = next
+  $.ui.invalidate('ui.render')
+}
+
+// 펼쳐 본 포켓몬은 NEW 를 지운다. 박스에 없는 key 는 버려 파일이 자라지 않게 한다
+async function markSeen($: EngineInterface, key: string, box: readonly BoxEntry[]) {
+  const home = await $.env.get('HOME')
+  if (!home) {
+    return
+  }
+  const inBox = new Set(box.map(entry => entry.key))
+  const next = new Set([...(await readKeys($, home, SEEN_FILE)), key].filter(one => inBox.has(one)))
+  await $.fs.write(`${home}/${SEEN_FILE}`, JSON.stringify([...next]))
+  seen = next
   $.ui.invalidate('ui.render')
 }
 
@@ -802,7 +871,8 @@ async function keepPokedex($: EngineInterface, sessions: SessionStatus[], now: n
       $.ui.toast(`Got an egg from the DAY CARE for ${egg.label}`)
     }
     for (const { entry, from } of grown.evolved) {
-      $.ui.toast(`What? ${await pokemonName($, home, from)} evolved into ${await pokemonName($, home, entry.species)}!`)
+      // 진화했다는 말은 패널의 진화 장면이 끝날 때 한다
+      $.ui.toast(`What? ${(await pokemonName($, home, from)).toUpperCase()} is evolving!`)
     }
     if (grown.dex.encounter && grown.dex.encounter.at === now) {
       $.ui.toast(`A wild ${(await pokemonName($, home, grown.dex.encounter.species)).toUpperCase()} appeared!`)
@@ -814,7 +884,8 @@ async function keepPokedex($: EngineInterface, sessions: SessionStatus[], now: n
       $.ui.toast(`Oh no! ${(await pokemonName($, home, species)).toUpperCase()} fled...`)
     }
   }
-  favorites = await readFavorites($, home)
+  favorites = await readKeys($, home, FAVORITES_FILE)
+  seen = await readKeys($, home, SEEN_FILE)
   await update($, pokedex, () => dex)
   const all = eggsOf(sessions, dex, now)
   // 기록에서 더 이상 부화한 알이 아니면 박스에 들어간 것이라 잊는다
@@ -984,8 +1055,16 @@ let boxPage = 0
 // 진화는 기록을 쓰는 세션이 적고 다른 세션은 30초마다 읽으므로, 깜빡임은 이 세션이 처음 본 때부터 센다
 let evolvingSeen = 0
 let evolvingSeenAt = 0
+// 이 진화를 처음 본 이 세션의 시각. 그림을 기다리느라 evolvingSeenAt 이 밀려도 그대로다
+let evolvingFirstAt = 0
 // 이보다 오래된 진화는 처음 봐도 깜빡이지 않는다. 다른 세션이 기록을 읽는 간격보다 넉넉하다
 const EVOLVING_FRESH_MS = 60 * 1000
+// 진화 전과 뒤 그림을 받을 때까지 진화 장면을 미룬다. 이만큼 기다려도 못 받으면 그림 없이 지나간다
+const EVOLVE_WAIT_MS = 30 * 1000
+// 진화 장면 아래 글 줄에 쓸 진화 전과 뒤 이름
+let evolvingNames: { from: string; to: string } | null = null
+// 마지막으로 그린 진화 장면 글. 바뀌면 다시 그린다
+let evolveCaptionDrawn: string | null = null
 // 이 패널이 마지막으로 본 전설 등장(기록에 적힌 시각)과, 그 등장 장면을 처음 보인 이 세션의 시각
 let arrivalSeen = 0
 // 보일 전설 장면. appear 는 줄무늬와 함께 나타나는 장면, catch 는 몬스터볼에 잡히는 장면. at 은 이 세션에서 장면을 시작할 시각
@@ -1027,7 +1106,7 @@ let daycareCollapsed = false
 // 이번 박스 페이지의 줄마다 보일 이름과 속성. 박스 key 로 찾는다
 let boxRows = new Map<
   string,
-  { name: string; types: string; caught: string; canLead: boolean; rarity: ReturnType<typeof rarityOf>; isFavorite: boolean }
+  { name: string; types: string; caught: string; canLead: boolean; rarity: ReturnType<typeof rarityOf>; isFavorite: boolean; isNew: boolean }
 >()
 // 눌러 펼친 박스 줄의 key. 펼친 줄 아래에 잡은 날짜와 어디서 왔는지, 키우미집 버튼이 보인다
 let boxOpen: string | null = null
@@ -1065,7 +1144,33 @@ function daycareCells(scene: { columns: number; input: NestInput }, now: number)
   const walker = lead ? (lookupSprite(lead.species, WALKER_SIZE) ?? null) : undefined
   const evolving = evolvingOf(scene, now) && scene.input.evolving
   const before = evolving ? (lookupSprite(evolving.from, WALKER_SIZE) ?? null) : null
-  return base64Of(drawDaycareGround(scene.input.daycare, scene.columns, nestFrame, walker, before))
+  const elapsed = evolving ? now - evolving.at : 0
+  return base64Of(drawDaycareGround(scene.input.daycare, scene.columns, nestFrame, walker, before, elapsed))
+}
+
+// 진화 장면 아래 글 줄. 원작처럼 진화하는 동안과 끝난 뒤 글이 다르다
+function evolveCaption(scene: { input: NestInput }, now: number): string | null {
+  const evolving = evolvingOf(scene, now) && scene.input.evolving
+  if (!evolving || !evolvingNames) {
+    return null
+  }
+  const { from, to } = evolvingNames
+  return evolvePhase(now - evolving.at) === 'done'
+    ? `Congratulations! Your ${from} evolved into ${to}!`
+    : `What? ${from} is evolving!`
+}
+
+// 진화 전과 뒤 그림을 아직 못 받았으면 장면의 시작을 지금으로 미룬다. 처음 본 뒤 EVOLVE_WAIT_MS 가 지나면 그만 미룬다
+function holdEvolution(scene: { input: NestInput }, now: number) {
+  const evolving = scene.input.evolving
+  const entry = evolvingOf(scene, now)
+  if (!evolving || !entry || now - evolvingFirstAt >= EVOLVE_WAIT_MS) {
+    return
+  }
+  if (!lookupSprite(evolving.from, WALKER_SIZE) || !lookupSprite(entry.species, WALKER_SIZE)) {
+    evolving.at = now
+    evolvingSeenAt = now
+  }
 }
 
 function startNest($: EngineInterface) {
@@ -1096,6 +1201,11 @@ async function tickNest($: EngineInterface) {
   }
   nestFrame += 1
   const now = await $.clock.now()
+  holdEvolution(nestScene, now)
+  // 진화 장면의 글이 바뀌거나 사라지면 다시 그린다
+  if (evolveCaption(nestScene, now) !== evolveCaptionDrawn) {
+    $.ui.invalidate('ui.render')
+  }
   // 진화 장면이 끝나 풀밭에 설 포켓몬이 사라지면 풀밭 높이가 바뀌므로 칠하지 않고 다시 그린다
   if (!daycareCollapsed && daycareGroundRows(walkerOf(nestScene, now) !== undefined) !== daycareRowsDrawn) {
     $.ui.invalidate('ui.render')
@@ -1537,6 +1647,7 @@ export const register: Register = (on, options) => {
     const repo = await ensureRepo($)
     const notes = await read($, inbox)
     const now = await $.clock.now()
+    const mineMr = mine?.branch ? (await read($, branchMrs))[mine.branch] : undefined
     const mrs = issueRows.filter(row => row.mr?.action)
     const hidden = [
       sessions.hidden.stale > 0 ? `unresponsive ${sessions.hidden.stale}` : null,
@@ -1562,9 +1673,19 @@ export const register: Register = (on, options) => {
       if (dex.evolving && dex.evolving.at !== evolvingSeen && now - dex.evolving.at < EVOLVING_FRESH_MS) {
         evolvingSeen = dex.evolving.at
         evolvingSeenAt = now
+        evolvingFirstAt = now
+        // 원작처럼 진화 장면은 놓치지 않게 접힌 키우미집을 편다
+        daycareCollapsed = false
         boxPage = boxPageOfKey({ eggs: [], daycare: [], box, boxPage }, dex.evolving.key)
       }
       const evolving = dex.evolving && dex.evolving.at === evolvingSeen ? { ...dex.evolving, at: evolvingSeenAt } : null
+      const grown = evolving && dex.box.find(entry => entry.key === evolving.key)
+      evolvingNames = grown
+        ? {
+            from: (await shownName($, home, evolving.from)).toUpperCase(),
+            to: (await shownName($, home, grown.species)).toUpperCase(),
+          }
+        : null
       // 막 온 전설을 처음 보면 이 세션의 시각부터 등장 장면을 센다
       if (dex.scene && dex.scene.at !== arrivalSeen && now - dex.scene.at < EVOLVING_FRESH_MS) {
         arrivalSeen = dex.scene.at
@@ -1613,6 +1734,7 @@ export const register: Register = (on, options) => {
           canLead: entry.key !== dex.lead,
           rarity: rarityOf(entry.species),
           isFavorite: favorites.has(entry.key),
+          isNew: now - entry.at < NEW_MS && !seen.has(entry.key),
         })
       }
       const walking = dex.box.find(entry => entry.key === dex.lead)
@@ -1630,9 +1752,19 @@ export const register: Register = (on, options) => {
         <Box flexDirection="column">
           {/* 세션 목록은 30초마다 읽어 늘 최신이라, 묵을 수 있는 GitLab 과 Linear 조회 시각만 보인다 */}
           <Box flexDirection="column">
-            {repo?.api && (
-              <Text dimColor>
-                {ICON.mr} GitLab {issues.isRefreshing ? 'fetching' : freshness(issues.refreshedAt, ISSUES_TTL_MS, now)}
+            {/* 어느 git 저장소에 붙어 MR 을 찾는지와, 알이 금 가고 부화하는 기준인 이 세션 브랜치의 MR 상태 */}
+            {repo && (
+              <Text dimColor wrap="truncate-end">
+                {ICON.mr} {repo.host === 'github' ? 'GitHub' : repo.host === 'gitlab' ? 'GitLab' : 'git'}
+                {repo.name ? ` ${repo.name}` : ''}
+                {' · '}
+                {repo.problem ?? (issues.isRefreshing ? 'fetching' : freshness(issues.refreshedAt, ISSUES_TTL_MS, now))}
+              </Text>
+            )}
+            {repo && !repo.problem && mine?.branch && !isLongLivedBranch(mine.branch, repo.base) && (
+              <Text dimColor wrap="truncate-end">
+                {'  '}
+                {mine.branch} · {mineMr ? `${repo.host === 'github' ? 'PR #' : 'MR !'}${mineMr.iid} ${mineMr.state}` : 'no MR yet'}
               </Text>
             )}
             {/* Linear 를 연결하지 않았으면 조회 시각도 보이지 않는다 */}
@@ -1900,6 +2032,13 @@ export const register: Register = (on, options) => {
                 cells={daycareCells(nestScene, now)}
               />
             )}
+            {(evolveCaptionDrawn = evolveCaption(nestScene, now)) && (
+              <Box paddingX={1}>
+                <Text bold wrap="truncate-end">
+                  {evolveCaptionDrawn}
+                </Text>
+              </Box>
+            )}
             <Box backgroundColor="#3a6ea5" width={nestScene.columns} paddingX={1} marginTop={1}>
               {/* 머리줄을 누르면 박스를 접거나 편다 */}
               <Button
@@ -1940,6 +2079,9 @@ export const register: Register = (on, options) => {
                             key={`box-row-${entry.key}`}
                             onPress={() => {
                               boxOpen = boxOpen === entry.key ? null : entry.key
+                              if (row.isNew) {
+                                void markSeen($, entry.key, nestScene!.input.box)
+                              }
                               $.ui.invalidate('ui.render')
                             }}
                           >
@@ -1951,6 +2093,12 @@ export const register: Register = (on, options) => {
                               {/* 전설은 금빛 ✦, 귀한 포켓몬은 하늘빛 ✧ */}
                               {row.rarity === 'legend' && <Text color="#ffc840"> ✦</Text>}
                               {row.rarity === 'rare' && <Text color="#80c8ff"> ✧</Text>}
+                              {row.isNew && (
+                                <Text bold color="#7ee787">
+                                  {' '}
+                                  NEW
+                                </Text>
+                              )}
                               {row.types && <Text dimColor>  {row.types}</Text>}
                             </Text>
                           </Button>
