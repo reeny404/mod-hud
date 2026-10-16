@@ -60,6 +60,8 @@ export function isMorphNew(elapsed: number): boolean {
 }
 // 부화한 뒤 높이 뛰며 반짝이는 시간
 export const CELEBRATE_MS = 90 * 1000
+// 세션이 닫힌 뒤 부화한 알은 아무도 못 봤을 수 있어, 박스로 보내기를 누를 때까지 둥지에 남는다. 이만큼 지나면 저절로 박스로 간다
+export const UNSEEN_HATCH_MS = 24 * 60 * 60 * 1000
 // /clear 나 /resume 로 끝난 세션의 알을 이어 받을 세션이 나타나길 기다리는 시간
 export const HANDOFF_MS = 2 * 60 * 1000
 // 키우미집에 남겨 두는 알 수. 넘치면 오래된 알부터 내보낸다
@@ -380,7 +382,10 @@ export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[],
   const release = (session: SessionStatus, held: HeldEgg) => {
     const egg = eggOf(session, held)
     const mrState = mrStateOf(sent, session)
-    if (mrState === 'merged' || mrState === 'opened') {
+    // 세션이 열려 있을 때 이미 부화해 보인 포켓몬은 바로 박스로 간다
+    if (mrState === 'merged' && hatched[egg.key] !== undefined) {
+      toBox(egg)
+    } else if (mrState === 'merged' || mrState === 'opened') {
       pending.push({ ...egg, mrState })
     } else {
       toDaycare(egg)
@@ -492,11 +497,11 @@ export function advancePokedex(dex: Pokedex, sessions: readonly SessionStatus[],
     given.push(eggOf(session, egg))
   }
 
-  // 머지된 알은 부화해 잠깐 뛰다가 박스로 간다. 머지 없이 닫힌 MR 의 알은 키우미집으로 간다
+  // 세션이 닫힌 뒤 머지된 알은 부화해 박스로 보내기를 누를 때까지 둥지에 남는다. 머지 없이 닫힌 MR 의 알은 키우미집으로 간다
   pending = pending.filter(egg => {
     if (egg.mrState === 'merged') {
       hatch(egg)
-      if (now - (hatched[egg.key] ?? now) < CELEBRATE_MS && !asked.has(egg.key)) {
+      if (now - (hatched[egg.key] ?? now) < UNSEEN_HATCH_MS && !asked.has(egg.key)) {
         return true
       }
       const { mrState: _, ...entry } = egg

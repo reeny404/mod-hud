@@ -34,11 +34,13 @@ import {
   emptyIssuesCache,
   findCheck,
   gitlabProjectApi,
+  isGithubRemote,
   isLongLivedBranch,
   issuesFileOf,
   ISSUES_TTL_MS,
   mrAction,
   parseDefaultBranch,
+  parseGithubPr,
   parseIssue,
   parseIssuesCache,
   parseWorktrees,
@@ -393,7 +395,15 @@ const issuesMeta = atom({ plugin: 'mod-hud', key: 'issuesMeta' } as const, {
 })
 
 // 세션이 열린 git 저장소. api 는 GitLab 프로젝트 API 주소이고 GitLab 이 아니면 null, base 는 커밋 수를 셀 기준 브랜치
-type RepoInfo = { root: string; api: string | null; base: string }
+// host 는 MR 을 찾는 곳(GitHub 는 gh CLI), name 은 패널에 보일 저장소 이름, problem 은 MR 을 못 찾는 까닭
+type RepoInfo = {
+  root: string
+  api: string | null
+  base: string
+  host: 'gitlab' | 'github' | null
+  name: string | null
+  problem: string | null
+}
 
 // undefined 는 아직 안 봄, null 은 git 저장소가 아님
 let repoInfo: RepoInfo | null | undefined
@@ -406,10 +416,25 @@ async function ensureRepo($: EngineInterface): Promise<RepoInfo | null> {
       repoInfo = null
     } else {
       const head = config.baseBranch ? null : await git($, repo.root, ['symbolic-ref', 'refs/remotes/origin/HEAD'])
+      const api = repo.remote ? gitlabProjectApi(repo.remote, config.gitlabUrl) : null
+      const host = api ? 'gitlab' : repo.remote && isGithubRemote(repo.remote) ? 'github' : null
       repoInfo = {
         root: repo.root,
-        api: repo.remote ? gitlabProjectApi(repo.remote, config.gitlabUrl) : null,
+        api,
         base: config.baseBranch || (head && parseDefaultBranch(head)) || 'main',
+        host,
+        name: repo.remote?.trim().match(/([^/:]+\/[^/:]+?)(?:\.git)?\/?$/)?.[1] ?? null,
+        problem: !repo.remote
+          ? 'no remote'
+          : host === 'gitlab'
+            ? (await readToken($, repo.root))
+              ? null
+              : 'no GITLAB_TOKEN'
+            : host === 'github'
+              ? (await isGhReady($, repo.root))
+                ? null
+                : 'gh not signed in'
+              : 'not GitLab or GitHub',
       }
     }
   }
@@ -439,6 +464,25 @@ async function fetchMr($: EngineInterface, api: string, token: string, branch: s
   }
   const [mr] = JSON.parse(res.text) as Array<Parameters<typeof mrAction>[0] & { iid: number; sha: string; web_url: string }>
   return mr ? { iid: mr.iid, state: mr.state, sha: mr.sha, url: mr.web_url, action: mrAction(mr) } : null
+}
+
+async function isGhReady($: EngineInterface, cwd: string): Promise<boolean> {
+  try {
+    return (await $.process.run(['gh', 'auth', 'status'], { cwd })).exitCode === 0
+  } catch {
+    return false
+  }
+}
+
+// GitHub 는 gh CLI 로 브랜치의 가장 최근 PR 을 찾는다. gh 가 없거나 로그인하지 않았으면 null
+async function fetchPr($: EngineInterface, cwd: string, branch: string): Promise<Mr | null> {
+  try {
+    const fields = 'number,state,headRefOid,url,mergeable'
+    const ran = await $.process.run(['gh', 'pr', 'list', '--head', branch, '--state', 'all', '--limit', '1', '--json', fields], { cwd })
+    return ran.exitCode === 0 ? parseGithubPr(ran.stdout) : null
+  } catch {
+    return null
+  }
 }
 
 async function fetchLinear($: EngineInterface, issue: string, now: number): Promise<string | null> {
@@ -478,13 +522,14 @@ async function cleanup($: EngineInterface, root: string, row: Row): Promise<stri
 }
 
 // git, GitLab, Linear 를 불러 worktree 목록을 새로 만든다. 조회를 맡은 세션만 부른다
-async function collectIssues($: EngineInterface, { root, api, base }: RepoInfo, now: number) {
+async function collectIssues($: EngineInterface, { root, api, base, host }: RepoInfo, now: number) {
   const listed = await $.process.run(['git', 'worktree', 'list', '--porcelain'], { cwd: root })
   const trees = parseWorktrees(listed.stdout)
   const allSessions = await readSessions($)
   const sessions = assignSessions(trees, allSessions, now)
   const token = api ? await readToken($, root) : null
-  const findMr = (branch: string) => (api && token ? fetchMr($, api, token, branch) : null)
+  const findMr = (branch: string) =>
+    api && token ? fetchMr($, api, token, branch) : host === 'github' ? fetchPr($, root, branch) : null
   const ownCwd = await $.session.cwd()
 
   const next: Row[] = []
@@ -650,7 +695,12 @@ async function refreshPending($: EngineInterface, dex: Pokedex): Promise<Pokedex
       const remote = (await git($, egg.root, ['remote', 'get-url', 'origin']))?.trim()
       const api = remote ? gitlabProjectApi(remote, config.gitlabUrl) : null
       const token = api ? await readToken($, egg.root) : null
-      const mr = api && token ? await fetchMr($, api, token, egg.branch) : null
+      const mr =
+        api && token
+          ? await fetchMr($, api, token, egg.branch)
+          : remote && isGithubRemote(remote)
+            ? await fetchPr($, egg.root, egg.branch)
+            : null
       if (mr && mr.state !== egg.mrState) {
         next = updatePending(next, egg.key, mr.state)
       }
@@ -1578,6 +1628,7 @@ export const register: Register = (on, options) => {
     const repo = await ensureRepo($)
     const notes = await read($, inbox)
     const now = await $.clock.now()
+    const mineMr = mine?.branch ? (await read($, branchMrs))[mine.branch] : undefined
     const mrs = issueRows.filter(row => row.mr?.action)
     const hidden = [
       sessions.hidden.stale > 0 ? `unresponsive ${sessions.hidden.stale}` : null,
@@ -1681,9 +1732,19 @@ export const register: Register = (on, options) => {
         <Box flexDirection="column">
           {/* 세션 목록은 30초마다 읽어 늘 최신이라, 묵을 수 있는 GitLab 과 Linear 조회 시각만 보인다 */}
           <Box flexDirection="column">
-            {repo?.api && (
-              <Text dimColor>
-                {ICON.mr} GitLab {issues.isRefreshing ? 'fetching' : freshness(issues.refreshedAt, ISSUES_TTL_MS, now)}
+            {/* 어느 git 저장소에 붙어 MR 을 찾는지와, 알이 금 가고 부화하는 기준인 이 세션 브랜치의 MR 상태 */}
+            {repo && (
+              <Text dimColor wrap="truncate-end">
+                {ICON.mr} {repo.host === 'github' ? 'GitHub' : repo.host === 'gitlab' ? 'GitLab' : 'git'}
+                {repo.name ? ` ${repo.name}` : ''}
+                {' · '}
+                {repo.problem ?? (issues.isRefreshing ? 'fetching' : freshness(issues.refreshedAt, ISSUES_TTL_MS, now))}
+              </Text>
+            )}
+            {repo && !repo.problem && mine?.branch && !isLongLivedBranch(mine.branch, repo.base) && (
+              <Text dimColor wrap="truncate-end">
+                {'  '}
+                {mine.branch} · {mineMr ? `${repo.host === 'github' ? 'PR #' : 'MR !'}${mineMr.iid} ${mineMr.state}` : 'no MR yet'}
               </Text>
             )}
             {/* Linear 를 연결하지 않았으면 조회 시각도 보이지 않는다 */}

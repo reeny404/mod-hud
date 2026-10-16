@@ -36,6 +36,7 @@ import {
   parsePokedex,
   speciesOf,
   speciesToLoad,
+  UNSEEN_HATCH_MS,
   updatePending,
 } from './nest-lib'
 import type { SpriteLookup } from './nest-lib'
@@ -200,23 +201,32 @@ test('MR 이 열린 채 닫힌 세션의 알은 금 간 채 남아 머지를 기
   expect(eggsOf([], first.dex, NOW).map(egg => egg.stage)).toEqual(['cracked'])
 })
 
-test('기다리던 MR 이 머지되면 부화해 잠깐 뛰다가 박스로 간다', () => {
+test('기다리던 MR 이 머지되면 부화해 박스로 보내기를 누르거나 하루가 지날 때까지 둥지에 남는다', () => {
   const sessions = [session('a', { ...closed, mrState: 'opened' })]
   const waiting = advancePokedex(dexOf({ holds: { a: held('egg-a') } }), sessions, NOW).dex
   const merged = advancePokedex(updatePending(waiting, 'egg-a', 'merged'), sessions, NOW + 1)
   expect(merged.born.map(egg => egg.key)).toEqual(['egg-a'])
   expect(merged.boxed).toEqual([])
   expect(eggsOf([], merged.dex, NOW + 1).map(egg => egg.stage)).toEqual(['hatched'])
+  // 아무도 못 봤을 수 있어 뛰기가 끝나도 남는다
   const later = advancePokedex(merged.dex, sessions, NOW + 1 + CELEBRATE_MS)
-  expect(later.boxed.map(egg => egg.key)).toEqual(['egg-a'])
-  expect(later.dex.box.map(egg => egg.key)).toEqual(['egg-a'])
-  expect(later.dex.pending).toEqual([])
+  expect(later.boxed).toEqual([])
+  expect(eggsOf([], later.dex, NOW + 1 + CELEBRATE_MS).map(egg => egg.stage)).toEqual(['hatched'])
+  // 박스로 보내기를 누르면 간다
+  const sent = advancePokedex(later.dex, sessions, NOW + 2 + CELEBRATE_MS, ['egg-a'])
+  expect(sent.boxed.map(egg => egg.key)).toEqual(['egg-a'])
+  expect(sent.dex.pending).toEqual([])
+  // 누르지 않아도 하루가 지나면 간다
+  const dayLater = advancePokedex(later.dex, sessions, NOW + 1 + UNSEEN_HATCH_MS)
+  expect(dayLater.dex.box.map(egg => egg.key)).toEqual(['egg-a'])
+  expect(dayLater.dex.pending).toEqual([])
 })
 
 test('부화한 세션이 닫히면 바로 박스로 간다', () => {
   const live = advancePokedex(dexOf({ holds: { a: held('egg-a') } }), [session('a', { mrState: 'merged' })], NOW).dex
-  const after = advancePokedex(live, [session('a', { ...closed, mrState: 'merged' })], NOW + CELEBRATE_MS)
+  const after = advancePokedex(live, [session('a', { ...closed, mrState: 'merged' })], NOW + 1)
   expect(after.boxed.map(egg => egg.key)).toEqual(['egg-a'])
+  expect(after.dex.pending).toEqual([])
 })
 
 test('박스로 보낸 세션은 빈 세션이 되고, 진행 중이 되면 새 알을 받지만 같은 브랜치의 머지로는 깨지지 않는다', () => {
@@ -380,9 +390,8 @@ test('/clear 로 이어진 세션이 이미 알을 들고 있어도 끝난 세�
   ]
   const after = advancePokedex(live, sessions, NOW + 1)
   expect(after.dex.daycare).toEqual([])
-  expect(after.dex.pending.map(egg => [egg.key, egg.mrState])).toEqual([['egg-old', 'merged']])
-  const later = advancePokedex(after.dex, sessions, NOW + CELEBRATE_MS)
-  expect(later.dex.box.map(egg => egg.key)).toEqual(['egg-old'])
+  expect(after.dex.pending).toEqual([])
+  expect(after.dex.box.map(egg => egg.key)).toEqual(['egg-old'])
 })
 
 test('알을 받은 뒤 대시보드로 표시한 세션은 알을 키우미집에 돌려준다', () => {

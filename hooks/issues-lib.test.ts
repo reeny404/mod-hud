@@ -6,10 +6,12 @@ import {
   cleanupBlocker,
   findCheck,
   gitlabProjectApi,
+  isGithubRemote,
   isLongLivedBranch,
   issuesFileOf,
   mrAction,
   parseDefaultBranch,
+  parseGithubPr,
   parseIssue,
   parseWorktrees,
   readEnvValue,
@@ -161,4 +163,21 @@ test('파이썬 검사 도구도 검사로 남긴다', () => {
   expect(findCheck('ruff check . | head')).toBe('ruff')
   expect(findCheck('git commit -m "pytest 고침"')).toBeNull()
   expect(findCheck('npm run lint')).toBe('lint')
+})
+
+test('GitHub remote 를 알아보고 gh 의 PR 을 MR 과 같은 모양으로 바꾼다', () => {
+  expect(isGithubRemote('https://github.com/me/repo.git')).toBe(true)
+  expect(isGithubRemote('git@github.com:me/repo.git')).toBe(true)
+  expect(isGithubRemote('ssh://git@github.com/me/repo.git')).toBe(true)
+  expect(isGithubRemote('https://gitlab.example.com/me/repo')).toBe(false)
+  expect(isGithubRemote('https://notgithub.com/me/repo')).toBe(false)
+  const pr = (state: string, mergeable = 'UNKNOWN') =>
+    JSON.stringify([{ number: 8, state, headRefOid: 'abc', url: 'https://github.com/me/repo/pull/8', mergeable }])
+  expect(parseGithubPr(pr('MERGED'))).toEqual({ iid: 8, state: 'merged', sha: 'abc', url: 'https://github.com/me/repo/pull/8', action: null })
+  expect(parseGithubPr(pr('OPEN', 'MERGEABLE'))?.state).toBe('opened')
+  expect(parseGithubPr(pr('OPEN', 'MERGEABLE'))?.action).toBe('mergeable')
+  expect(parseGithubPr(pr('OPEN', 'CONFLICTING'))?.action).toBe('conflict')
+  expect(parseGithubPr(pr('CLOSED'))?.state).toBe('closed')
+  expect(parseGithubPr('[]')).toBeNull()
+  expect(parseGithubPr('not json')).toBeNull()
 })
