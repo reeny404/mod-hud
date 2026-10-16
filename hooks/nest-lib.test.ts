@@ -22,10 +22,12 @@ import {
   eggsOf,
   eggsOnScreen,
   emptyPokedex,
+  favoritesFirst,
   freshEggs,
   keeperOf,
   localDay,
   nestRows,
+  parseFavorites,
   parsePokedex,
   speciesOf,
   speciesToLoad,
@@ -680,4 +682,17 @@ test('알 칸은 16칸이라 폭 48 에 알이 한 줄에 셋씩 두 줄 들어�
     const xs = rows.flatMap(row => [...row].flatMap((c, x) => (c === '.' ? [] : [x])))
     expect(Math.max(...xs) - Math.min(...xs) + 1).toBeLessThanOrEqual(16)
   }
+})
+
+test('즐겨찾는 포켓몬은 PC BOX 맨 앞에 모이고 나머지는 순서를 지킨다', () => {
+  const at = (key: string) => ({ key, species: 13, root: '/r', branch: null, label: key, at: 0 })
+  const box = [at('a'), at('b'), at('c'), at('d')]
+  expect(favoritesFirst(box, new Set(['c', 'a'])).map(entry => entry.key)).toEqual(['a', 'c', 'b', 'd'])
+  expect(favoritesFirst(box, new Set()).map(entry => entry.key)).toEqual(['a', 'b', 'c', 'd'])
+})
+
+test('즐겨찾기 파일은 글자 key 만 읽고 깨졌으면 비운다', () => {
+  expect(parseFavorites('["a", 3, "b"]')).toEqual(['a', 'b'])
+  expect(parseFavorites('{')).toEqual([])
+  expect(parseFavorites('{"a": 1}')).toEqual([])
 })

@@ -28,6 +28,20 @@ export const LEGEND_FINALS: Readonly<Record<144 | 145 | 146, readonly number[]>>
   146: [6, 38, 59, 78, 136],
 }
 
+// 원작에서 귀한 포켓몬. 한 번만 받거나, 화석에서 되살리거나, 사파리존이나 게임코너에서만 만나거나, 드물게 나오는 종이다
+const RARE_SPECIES: ReadonlySet<number> = new Set([
+  83, 106, 107, 108, 113, 115, 122, 123, 124, 125, 126, 127, 128, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141,
+  142, 143, 147, 148, 149,
+])
+
+// PC BOX 줄의 이름 뒤에 붙는 표시. 전설은 ✦, 귀한 포켓몬은 ✧ 이다
+export function rarityOf(species: number): 'legend' | 'rare' | null {
+  if ((Object.values(LEGENDS) as number[]).includes(species)) {
+    return 'legend'
+  }
+  return RARE_SPECIES.has(species) ? 'rare' : null
+}
+
 // 도감이 이만큼 차면 뮤츠가 온다
 export const MEWTWO_DEX = 100
 
