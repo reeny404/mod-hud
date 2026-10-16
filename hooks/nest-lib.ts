@@ -942,8 +942,8 @@ export function drawPortrait(species: number, lookup: SpriteLookup): { columns: 
   return { columns: canvas.width, rows: canvas.height / 2, cells: Uint32Array.from(out) }
 }
 
-// 즐겨찾기 파일(~/.claude/mod-hud-favorites.json)은 박스 key 의 배열이다. 읽지 못하면 아무것도 즐겨찾지 않은 것으로 본다
-export function parseFavorites(text: string): string[] {
+// 즐겨찾기 파일(~/.claude/mod-hud-favorites.json)과 펼쳐 본 파일(~/.claude/mod-hud-seen.json)은 박스 key 의 배열이다. 읽지 못하면 빈 것으로 본다
+export function parseKeys(text: string): string[] {
   try {
     const parsed: unknown = JSON.parse(text)
     return Array.isArray(parsed) ? parsed.filter((key): key is string => typeof key === 'string') : []

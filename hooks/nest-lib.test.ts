@@ -32,7 +32,7 @@ import {
   keeperOf,
   localDay,
   nestRows,
-  parseFavorites,
+  parseKeys,
   parsePokedex,
   speciesOf,
   speciesToLoad,
@@ -731,7 +731,7 @@ test('즐겨찾는 포켓몬은 PC BOX 맨 앞에 모이고 나머지는 순서�
 })
 
 test('즐겨찾기 파일은 글자 key 만 읽고 깨졌으면 비운다', () => {
-  expect(parseFavorites('["a", 3, "b"]')).toEqual(['a', 'b'])
-  expect(parseFavorites('{')).toEqual([])
-  expect(parseFavorites('{"a": 1}')).toEqual([])
+  expect(parseKeys('["a", 3, "b"]')).toEqual(['a', 'b'])
+  expect(parseKeys('{')).toEqual([])
+  expect(parseKeys('{"a": 1}')).toEqual([])
 })

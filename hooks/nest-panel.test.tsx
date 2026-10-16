@@ -89,9 +89,10 @@ test('옆에 붙은 패널은 DAY CARE 머리줄에 맡긴 포켓몬과 경험�
   let tree = await pane.drawn()
   expect(nodes(tree, 'Raster').some(raster => String(raster.props?.key).startsWith('tile-'))).toBe(false)
   const row = (key: string) => nodes(tree, 'Button', { key: `box-row-${key}` }).map(textOf).join('')
-  expect(row('a')).toBe('★   RATTATA  NORMAL')
-  expect(row('b')).toBe('    CHARIZARD  FIRE/FLYING')
-  expect(row('c')).toBe('    PIDGEY  NORMAL/FLYING')
+  // 모두 막 박스에 들어와 아직 펼쳐 보지 않아 NEW 가 붙는다
+  expect(row('a')).toBe('★   RATTATA NEW  NORMAL')
+  expect(row('b')).toBe('    CHARIZARD NEW  FIRE/FLYING')
+  expect(row('c')).toBe('    PIDGEY NEW  NORMAL/FLYING')
   // 다음 진화는 미리 보이지 않고, 키우미집 버튼은 줄을 펼치기 전에는 없다
   expect(await pane.find({ type: 'Text', text: /Raticate|Pidgeotto/ })).toBeUndefined()
   expect(nodes(tree, 'Button', { key: 'lead-c' }).length).toBe(0)
@@ -375,7 +376,9 @@ test('Refresh now 를 누르면 1분 동안 버튼 대신 조회 중인지, 끝�
 
 test('전설은 ✦, 귀한 포켓몬은 ✧ 가 이름 뒤에, 즐겨찾는 포켓몬은 ♥ 가 이름 앞에 붙고 즐겨찾는 포켓몬이 PC BOX 맨 앞에 온다', async ($, on) => {
   mock.clock(on, { now: NOW })
-  const dex: Pokedex = { ...emptyPokedex(), box: [entry('legend:146', 146, 0), entry('b', 143, 1), entry('a', 13, 2)], lead: null, xp: 0 }
+  // 파이어와 잠만보는 이틀 전에 들어왔고 뿔충이는 막 들어왔다
+  const old = NOW - 2 * 24 * 60 * 60 * 1000
+  const dex: Pokedex = { ...emptyPokedex(), box: [entry('legend:146', 146, old), entry('b', 143, old), entry('a', 13, NOW - 1000)], lead: null, xp: 0 }
   const writes: Array<{ path: string; text: string }> = []
   on('env.get', () => ({ value: '/home/test' }))
   on('fs.exists', ($, e) => {
@@ -418,11 +421,14 @@ test('전설은 ✦, 귀한 포켓몬은 ✧ 가 이름 뒤에, 즐겨찾는 포
   // 즐겨찾는 뿔충이가 맨 앞이다
   expect(rows.map(node => node.props?.key)).toEqual(['box-row-a', 'box-row-legend:146', 'box-row-b'])
   // 즐겨찾지 않는 줄도 ♥ 자리를 비워 이름이 같은 자리에서 시작한다
-  expect(textOf(rows[0])).toMatch(/^  ♥ WEEDLE/)
-  expect(textOf(rows[1])).toMatch(/^    MOLTRES ✦/)
-  expect(textOf(rows[2])).toMatch(/^    SNORLAX ✧/)
-  // 펼친 줄의 버튼으로 즐겨찾기를 끄면 파일에서 뺀다
+  expect(textOf(rows[0])).toMatch(/^  ♥ WEEDLE NEW/)
+  expect(textOf(rows[1])).toBe('    MOLTRES ✦  FIRE/FLYING')
+  expect(textOf(rows[2])).toBe('    SNORLAX ✧  NORMAL')
+  // 펼쳐 보면 NEW 가 사라지고 펼쳐 본 key 를 파일에 적는다
   await pane.press({ key: 'box-row-a' })
+  expect(textOf(nodes(await pane.drawn(), 'Button', { key: 'box-row-a' })[0])).not.toContain('NEW')
+  expect(writes.filter(write => write.path.endsWith('mod-hud-seen.json')).at(-1)?.text).toBe('["a"]')
+  // 펼친 줄의 버튼으로 즐겨찾기를 끄면 파일에서 뺀다
   expect(nodes(await pane.drawn(), 'Button', { key: 'favorite-a', label: '♡ Unfavorite' }).length).toBe(1)
   await pane.press({ key: 'favorite-a' })
   const saved = writes.filter(write => write.path.endsWith('mod-hud-favorites.json'))

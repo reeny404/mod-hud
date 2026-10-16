@@ -72,7 +72,7 @@ import {
   keeperOf,
   localDay,
   nestRows,
-  parseFavorites,
+  parseKeys,
   parsePokedex,
   speciesToLoad,
   updatePending,
@@ -664,6 +664,10 @@ const LEAD_FILE = '.claude/mod-hud-lead'
 const ENCOUNTER_FILE = '.claude/mod-hud-encounter'
 // 즐겨찾는 박스 key. 기록과 따로 두어 어느 세션에서 눌러도 바로 쓰고, 다른 세션은 다음 조회 때 읽는다
 const FAVORITES_FILE = '.claude/mod-hud-favorites.json'
+// 한 번 펼쳐 본 박스 key. 펼쳐 본 포켓몬은 NEW 가 사라진다. 다른 세션도 다음 조회 때 읽는다
+const SEEN_FILE = '.claude/mod-hud-seen.json'
+// 박스에 들어온 지 이만큼 안 된 포켓몬은 펼쳐 보기 전까지 이름 뒤에 NEW 가 붙는다. 밤사이 머지돼도 다음 날 보이게 하루로 둔다
+const NEW_MS = 24 * 60 * 60 * 1000
 // 세션이 닫힌 뒤 머지를 기다리는 알의 MR 을 다시 조회하는 간격
 const PENDING_CHECK_MS = 2 * 60 * 1000
 
@@ -673,6 +677,7 @@ const eggs = atom({ plugin: 'mod-hud', key: 'eggs' } as const, [])
 let pendingCheckedAt = 0
 // 즐겨찾는 포켓몬은 PC BOX 맨 앞에 모이고 이름 앞에 ♥ 가 붙는다
 let favorites = new Set<string>()
+let seen = new Set<string>()
 // 이 패널에서 박스로 보낸 알. 기록을 쓰는 세션이 반영할 때까지 기록을 다시 읽어도 패널에 되살리지 않는다
 const sending = new Set<string>()
 
@@ -729,10 +734,10 @@ async function sendToBox($: EngineInterface, key: string) {
   void refreshSessions($)
 }
 
-async function readFavorites($: EngineInterface, home: string): Promise<Set<string>> {
+async function readKeys($: EngineInterface, home: string, file: string): Promise<Set<string>> {
   try {
-    const path = `${home}/${FAVORITES_FILE}`
-    return new Set((await $.fs.exists(path)) ? parseFavorites(await $.fs.read(path)) : [])
+    const path = `${home}/${file}`
+    return new Set((await $.fs.exists(path)) ? parseKeys(await $.fs.read(path)) : [])
   } catch {
     return new Set()
   }
@@ -744,7 +749,7 @@ async function toggleFavorite($: EngineInterface, key: string) {
     return
   }
   // 다른 세션에서 바꾼 것을 덮지 않게 파일을 다시 읽고 고친다
-  const next = await readFavorites($, home)
+  const next = await readKeys($, home, FAVORITES_FILE)
   if (next.has(key)) {
     next.delete(key)
   } else {
@@ -752,6 +757,19 @@ async function toggleFavorite($: EngineInterface, key: string) {
   }
   await $.fs.write(`${home}/${FAVORITES_FILE}`, JSON.stringify([...next]))
   favorites = next
+  $.ui.invalidate('ui.render')
+}
+
+// 펼쳐 본 포켓몬은 NEW 를 지운다. 박스에 없는 key 는 버려 파일이 자라지 않게 한다
+async function markSeen($: EngineInterface, key: string, box: readonly BoxEntry[]) {
+  const home = await $.env.get('HOME')
+  if (!home) {
+    return
+  }
+  const inBox = new Set(box.map(entry => entry.key))
+  const next = new Set([...(await readKeys($, home, SEEN_FILE)), key].filter(one => inBox.has(one)))
+  await $.fs.write(`${home}/${SEEN_FILE}`, JSON.stringify([...next]))
+  seen = next
   $.ui.invalidate('ui.render')
 }
 
@@ -866,7 +884,8 @@ async function keepPokedex($: EngineInterface, sessions: SessionStatus[], now: n
       $.ui.toast(`Oh no! ${(await pokemonName($, home, species)).toUpperCase()} fled...`)
     }
   }
-  favorites = await readFavorites($, home)
+  favorites = await readKeys($, home, FAVORITES_FILE)
+  seen = await readKeys($, home, SEEN_FILE)
   await update($, pokedex, () => dex)
   const all = eggsOf(sessions, dex, now)
   // 기록에서 더 이상 부화한 알이 아니면 박스에 들어간 것이라 잊는다
@@ -1087,7 +1106,7 @@ let daycareCollapsed = false
 // 이번 박스 페이지의 줄마다 보일 이름과 속성. 박스 key 로 찾는다
 let boxRows = new Map<
   string,
-  { name: string; types: string; caught: string; canLead: boolean; rarity: ReturnType<typeof rarityOf>; isFavorite: boolean }
+  { name: string; types: string; caught: string; canLead: boolean; rarity: ReturnType<typeof rarityOf>; isFavorite: boolean; isNew: boolean }
 >()
 // 눌러 펼친 박스 줄의 key. 펼친 줄 아래에 잡은 날짜와 어디서 왔는지, 키우미집 버튼이 보인다
 let boxOpen: string | null = null
@@ -1715,6 +1734,7 @@ export const register: Register = (on, options) => {
           canLead: entry.key !== dex.lead,
           rarity: rarityOf(entry.species),
           isFavorite: favorites.has(entry.key),
+          isNew: now - entry.at < NEW_MS && !seen.has(entry.key),
         })
       }
       const walking = dex.box.find(entry => entry.key === dex.lead)
@@ -2059,6 +2079,9 @@ export const register: Register = (on, options) => {
                             key={`box-row-${entry.key}`}
                             onPress={() => {
                               boxOpen = boxOpen === entry.key ? null : entry.key
+                              if (row.isNew) {
+                                void markSeen($, entry.key, nestScene!.input.box)
+                              }
                               $.ui.invalidate('ui.render')
                             }}
                           >
@@ -2070,6 +2093,12 @@ export const register: Register = (on, options) => {
                               {/* 전설은 금빛 ✦, 귀한 포켓몬은 하늘빛 ✧ */}
                               {row.rarity === 'legend' && <Text color="#ffc840"> ✦</Text>}
                               {row.rarity === 'rare' && <Text color="#80c8ff"> ✧</Text>}
+                              {row.isNew && (
+                                <Text bold color="#7ee787">
+                                  {' '}
+                                  NEW
+                                </Text>
+                              )}
                               {row.types && <Text dimColor>  {row.types}</Text>}
                             </Text>
                           </Button>
